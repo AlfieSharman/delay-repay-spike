@@ -1,0 +1,24 @@
+{
+  "name": "delay-repay-spike",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Spike for a Proactive Delay Repay feature: ingests UK rail static data feeds from the National Rail Data Portal (NRDP).",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "download": "tsx src/ingest/download.ts",
+    "inspect": "tsx src/ingest/inspect.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "dotenv": "^16.4.7",
+    "extract-zip": "^2.0.1"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.0"
+  }
+}

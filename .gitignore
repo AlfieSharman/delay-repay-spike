@@ -1,0 +1,12 @@
+# Secrets - never commit real credentials
+.env
+
+# Downloaded feeds and extracted data - large, regenerable
+data/
+
+# Dependencies
+node_modules/
+
+# Logs and OS cruft
+*.log
+.DS_Store
