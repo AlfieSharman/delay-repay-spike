@@ -10,13 +10,17 @@
   "scripts": {
     "download": "tsx src/ingest/download.ts",
     "inspect": "tsx src/ingest/inspect.ts",
+    "load": "tsx src/parse/load.ts",
+    "query": "tsx src/query.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "better-sqlite3": "^12.11.1",
     "dotenv": "^16.4.7",
     "extract-zip": "^2.0.1"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^22.10.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.0"
