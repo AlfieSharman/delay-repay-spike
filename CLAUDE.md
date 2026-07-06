@@ -17,9 +17,10 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
 2. **Parse & load** (done) - parse the raw CIF/fares files, filter to Southeastern,
    load into a local SQLite database at `data/spike.db`. See `src/db/`,
    `src/parse/`, `src/query.ts`.
-3. **HSP client + eligibility logic** (next) - pull actual/planned times from the
+3. **HSP client + eligibility logic** (done) - pull actual/planned times from the
    Historic Service Performance API, compare against the timetable, and work out
-   delay-repay eligibility and compensation amount using the fares data.
+   delay-repay eligibility and the compensation band. See `src/hsp/`,
+   `src/eligibility/`, `src/timetable/`, `src/check.ts`.
 
 ### What phase 2 built
 
@@ -43,9 +44,10 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
 - **STP overlay resolution matters and is easy to get wrong.** A schedule UID can
   have several CIF records (P = permanent, O = overlay, N = new/STP-only, C =
   cancellation) covering different date ranges. For a given date: C beats
-  everything (train doesn't run), O or N beat P. See `resolveStp` in
-  `src/query.ts` - this logic will need to move into the eligibility checker in
-  phase 3, since it decides whether a service ran at all on a given day.
+  everything (train doesn't run), O or N beat P. `resolveStp` was factored out
+  of `src/query.ts` into `src/timetable/lookup.ts` in phase 3 so both the query
+  CLI and the eligibility engine share it - it decides whether a service ran at
+  all on a given day.
   - Passing/non-stopping calling points (CIF `LI` records with only a pass time,
     no arrival/departure) are excluded from "services calling at" - a train can
     be scheduled through a station without it counting as a call there.
@@ -57,6 +59,50 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
   it isn't part of a group). Any fare lookup must check both the station's NLC
   and its fare group, in both the load-time Southeastern filter and query-time
   lookups - missing this silently drops most fares into London.
+
+### What phase 3 built
+
+- `src/timetable/lookup.ts` - shared timetable helpers over the phase-2 SQLite
+  data: STP resolution (`resolveStp`), calendar checks, `servicesCallingAt`
+  (used by the query CLI) and `scheduledJourneysBetween` (origin->destination
+  services on a date, used by the check CLI). `src/query.ts` now imports these.
+- `src/hsp/client.ts` - typed client for HSP `serviceMetrics` (find RIDs on a
+  flow) and `serviceDetails` (actual vs scheduled times for one RID). HTTP Basic
+  auth with the NRDP creds. Requests are serialised 200ms apart and cached to
+  `data/hsp-cache/` keyed on a hash of the request body; `--no-cache` bypasses.
+- `src/eligibility/journey.ts` - types (`Journey`, `Leg`, `ServiceRun`,
+  `EligibilityResult`) and the SE compensation bands.
+- `src/eligibility/engine.ts` - `assessEligibility`: pure logic, takes the
+  intended journey plus the actual runs per leg and returns eligibility, delay,
+  band, compensation % and a step-by-step `explanation`. Unit-tested in
+  `engine.test.ts` (`npm test`).
+- `src/check.ts` - the demo CLI (`npm run check`), tying timetable + HSP +
+  engine together for "a customer with this ticket on this day".
+
+**Non-obvious things a developer picking this up should know:**
+
+- **Delay is measured only at the final destination**, against the intended
+  journey's scheduled arrival there - never at intermediate points.
+- **advance vs flexible tickets differ in the engine.** advance rides the booked
+  services and only falls through to the next valid service when a booked leg is
+  cancelled or a connection is missed; flexible always takes the best
+  (earliest-arriving) service from the intended departure onward, and is
+  ineligible if that best journey arrives less than the threshold late.
+- **Connections use a strict "ready before departure" rule.** A connection is
+  made only if `previous actual arrival + interchange` is *strictly* less than
+  the onward service's actual departure. Being ready at the exact departure
+  minute counts as missed - this is what makes the worked multi-leg example
+  (leg 1 arrives 16:50, 5-min interchange, booked 16:55 connection) resolve to
+  the next service. Default interchange is 5 minutes.
+- **HSP `location` fields are CRS codes**, and its `gbtt_ptd`/`gbtt_pta` public
+  times match the CIF public timetable, so they're used as the intended-journey
+  baseline; `actual_td`/`actual_ta` are the actuals. Empty actual arrival at the
+  destination is how a cancelled service shows up - there is no explicit flag.
+  (`late_canc_reason` is a delay *or* cancellation reason, so it is not a
+  reliable cancellation signal on its own.)
+- **HSP has no data for today or yesterday** and covers ~2 years back; the check
+  CLI warns if you pass a too-recent date. Overnight journeys (past-midnight
+  arrivals) are not handled - out of spike scope.
 
 ## Conventions
 
@@ -82,6 +128,9 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
 | `npm run inspect` | Print a summary of what's in `data/` (file sizes, first few lines) - no parsing. |
 | `npm run load` | Parse the raw feeds and load Southeastern-relevant data into `data/spike.db`. |
 | `npm run query -- <command>` | Sanity-check the loaded data. Commands: `stats`, `services <CRS> <YYYY-MM-DD>`, `fares <origin CRS> <dest CRS>`. |
+| `npm run check -- <origin CRS> <dest CRS> <YYYY-MM-DD> <dep HHMM>` | Simulate a customer's journey and print the Delay Repay verdict. Flags: `--via <CRS>`, `--advance` (default is a flexible ticket), `--return`, `--threshold <min>` (default 15), `--no-cache`. |
+| `npm test` | Run the eligibility engine unit tests (`node:test`). |
 | `npm run typecheck` | `tsc --noEmit`. |
 
 Run `npm run download` before `npm run load` - the parsers read from `data/`.
+`npm run check` needs `data/spike.db` loaded and valid NRDP creds in `.env`.

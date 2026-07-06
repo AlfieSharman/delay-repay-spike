@@ -8,96 +8,12 @@
 
 import Database from 'better-sqlite3';
 import { openDb } from './db/schema.js';
+import { formatMinutes, servicesCallingAt } from './timetable/lookup.js';
 
 const DB_PATH = 'data/spike.db';
 
-interface ScheduleRow {
-  readonly id: number;
-  readonly uid: string;
-  readonly stp_indicator: string;
-  readonly date_from: string;
-  readonly date_to: string;
-  readonly days_run: string;
-  readonly category: string;
-  readonly retail_train_id: string;
-}
-
-interface CallingPointRow {
-  readonly schedule_id: number;
-  readonly scheduled_arrival: number | null;
-  readonly scheduled_departure: number | null;
-  readonly scheduled_pass: number | null;
-  readonly platform: string | null;
-}
-
-/** Monday=0 .. Sunday=6, matching the order of a CIF days_run bitmask. */
-function mondayIndexedWeekday(dateStr: string): number {
-  const sundayIndexed = new Date(`${dateStr}T00:00:00Z`).getUTCDay();
-  return (sundayIndexed + 6) % 7;
-}
-
-function isActiveOnDate(schedule: ScheduleRow, dateStr: string): boolean {
-  if (dateStr < schedule.date_from || dateStr > schedule.date_to) return false;
-  return schedule.days_run[mondayIndexedWeekday(dateStr)] === '1';
-}
-
-function formatMinutes(minutes: number | null): string {
-  if (minutes == null) return '--:--';
-  const hh = Math.floor(minutes / 60) % 24;
-  const mm = minutes % 60;
-  return `${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}`;
-}
-
-/**
- * Resolves CIF STP overlays for one calendar date: a cancellation (C) beats
- * everything (the service doesn't run), an overlay (O) or new schedule (N)
- * beats the permanent (P) schedule they override.
- */
-function resolveStp(candidates: readonly ScheduleRow[]): ScheduleRow | null {
-  const byIndicator = (indicator: string): ScheduleRow | undefined =>
-    candidates.find((s) => s.stp_indicator === indicator);
-  if (byIndicator('C')) return null;
-  return byIndicator('O') ?? byIndicator('N') ?? byIndicator('P') ?? null;
-}
-
 function runServices(db: Database.Database, crs: string, date: string): void {
-  const tiplocs = (db.prepare('SELECT tiploc FROM stations WHERE crs = ?').all(crs) as { tiploc: string }[]).map(
-    (r) => r.tiploc,
-  );
-  if (tiplocs.length === 0) {
-    console.log(`No station found with CRS "${crs}".`);
-    return;
-  }
-
-  const placeholders = tiplocs.map(() => '?').join(',');
-  const rows = db
-    .prepare(
-      `
-      SELECT sc.id, sc.uid, sc.stp_indicator, sc.date_from, sc.date_to, sc.days_run, sc.category, sc.retail_train_id,
-             cp.schedule_id, cp.scheduled_arrival, cp.scheduled_departure, cp.scheduled_pass, cp.platform
-      FROM calling_points cp
-      JOIN schedules sc ON sc.id = cp.schedule_id
-      WHERE cp.tiploc IN (${placeholders})
-        AND (cp.scheduled_arrival IS NOT NULL OR cp.scheduled_departure IS NOT NULL)
-    `,
-    )
-    .all(...tiplocs) as (ScheduleRow & CallingPointRow)[];
-
-  const active = rows.filter((r) => isActiveOnDate(r, date));
-
-  const byUid = new Map<string, (ScheduleRow & CallingPointRow)[]>();
-  for (const row of active) {
-    const group = byUid.get(row.uid) ?? [];
-    group.push(row);
-    byUid.set(row.uid, group);
-  }
-
-  const results: (ScheduleRow & CallingPointRow)[] = [];
-  for (const group of byUid.values()) {
-    const winner = resolveStp(group);
-    if (winner) results.push(winner as ScheduleRow & CallingPointRow);
-  }
-
+  const results = servicesCallingAt(db, crs, date);
   results.sort((a, b) => (a.scheduled_departure ?? a.scheduled_arrival ?? 0) - (b.scheduled_departure ?? b.scheduled_arrival ?? 0));
 
   console.log(`Southeastern services calling at ${crs} on ${date}:\n`);

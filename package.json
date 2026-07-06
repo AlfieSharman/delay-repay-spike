@@ -12,6 +12,8 @@
     "inspect": "tsx src/ingest/inspect.ts",
     "load": "tsx src/parse/load.ts",
     "query": "tsx src/query.ts",
+    "check": "tsx src/check.ts",
+    "test": "node --import tsx --test $(find src -name '*.test.ts')",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
