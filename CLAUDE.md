@@ -21,6 +21,10 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
    Historic Service Performance API, compare against the timetable, and work out
    delay-repay eligibility and the compensation band. See `src/hsp/`,
    `src/eligibility/`, `src/timetable/`, `src/check.ts`.
+4. **Service prediction + batch verdicts** (in progress) - from a ticket plus
+   its scan data, predict which service the customer travelled on, check
+   validity, and produce a Delay Repay verdict. See `src/predict/`, `src/batch.ts`
+   and the algorithm in `docs/service-prediction.md`.
 
 ### What phase 2 built
 
@@ -104,6 +108,51 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
   CLI warns if you pass a too-recent date. Overnight journeys (past-midnight
   arrivals) are not handled - out of spike scope.
 
+### What phase 4 built
+
+- `src/predict/scans.ts` - normalise raw scan JSON (NLC->CRS, ISO->minutes),
+  classify each scan (gateline / on-train / admin / rejected), group by coupon,
+  and extract the travel constraints (entry tap, exit tap, on-train service
+  hints, anomalies). Pure.
+- `src/predict/resolve.ts` - given a scheduled itinerary, the actual runs per
+  leg and the scan constraints, pick which services the customer actually
+  travelled on and grade the reconstruction (entry/exit tap fit).
+- `src/predict/validity.ts` - Advance booked-service enforcement, `TimeValidFrom`
+  and scan reason-code checks. Off-Peak restriction bands (RST data) are NOT
+  parsed yet, so those tickets get a "not verified" flag, never a false pass.
+- `src/predict/assess.ts` - orchestrates one coupon: resolve -> eligibility
+  engine -> validity -> confidence -> compensation. Pure; unit-tested end to
+  end against the five real tickets in `predict.test.ts`.
+- `src/predict/provider.ts` - the impure data layer for the batch runner:
+  resolves NLCs/fare groups and ticket metadata from SQLite, and builds
+  candidate itineraries from the timetable + HSP (direct, or one interchange).
+- `src/batch.ts` - `npm run batch -- <dir>`: reads ticketing-export JSON files,
+  runs the pipeline, prints a verdict per coupon and writes `results.json`.
+
+**Non-obvious things a developer picking this up should know:**
+
+- **Ticket origin/destination NLCs can be fare groups** (e.g. 1072 "LONDON
+  TERMINALS") with no CRS of their own. `resolveCrs` expands the group and
+  picks the member the scans actually used - resolve BOTH origin and
+  destination this way, not just destination.
+- **`STATION` in a scan is an NLC; a `clip` scan is on-train, not a gate.** Its
+  `STATION` is often just the booked end, not where the scan physically
+  happened, so on-train scans must not be treated as gateline entry/exit.
+- **Rejected scan reason codes are signals**: `INCTIM` (invalid time) implies
+  invalid travel; `LOCDIR` (wrong direction) is a review flag, not an
+  auto-reject. `train_info` can be stale (a unit still advertising its previous
+  working), so its direction is checked, never trusted blindly.
+- **Past-midnight arrivals must be normalised** (+1440 when arrival < departure)
+  before any min-arrival comparison, or a late-evening return that arrives after
+  midnight looks *earlier* than an on-time one and corrupts the delay.
+- **Delay baseline differs by ticket type**: Advance is judged against the
+  booked service; walk-up uses the eligibility engine's *flexible* mode (best
+  achievable arrival vs the intended scheduled arrival).
+- **Destination-only multi-leg journeys are the hard case.** With just an exit
+  tap the planner anchors on it and works backwards to find the interchange and
+  first leg; the intended baseline is the earliest scheduled onward connection.
+  This is heuristic - confidence caps at PROBABLE and it should be reviewed.
+
 ## Conventions
 
 - TypeScript, strict mode, ESM (`type: module`). No transpiled JS committed.
@@ -129,7 +178,8 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
 | `npm run load` | Parse the raw feeds and load Southeastern-relevant data into `data/spike.db`. |
 | `npm run query -- <command>` | Sanity-check the loaded data. Commands: `stats`, `services <CRS> <YYYY-MM-DD>`, `fares <origin CRS> <dest CRS>`. |
 | `npm run check -- <origin CRS> <dest CRS> <YYYY-MM-DD> <dep HHMM>` | Simulate a customer's journey and print the Delay Repay verdict. Flags: `--via <CRS>`, `--advance` (default is a flexible ticket), `--return`, `--threshold <min>` (default 15), `--no-cache`. |
-| `npm test` | Run the eligibility engine unit tests (`node:test`). |
+| `npm run batch -- <dir>` | Read ticketing-export JSON files from a directory, predict the service travelled and print a Delay Repay verdict per coupon; writes `results.json`. Add `--verbose` for the full explanation trail. |
+| `npm test` | Run the eligibility engine and prediction unit tests (`node:test`). |
 | `npm run typecheck` | `tsc --noEmit`. |
 
 Run `npm run download` before `npm run load` - the parsers read from `data/`.

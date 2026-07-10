@@ -178,3 +178,64 @@ export function scheduledJourneysBetween(
     }))
     .sort((a, b) => a.scheduledDeparture - b.scheduledDeparture);
 }
+
+/** A service leaving one station, with where it terminates. */
+export interface OriginService {
+  readonly uid: string;
+  readonly originDeparture: number;
+  readonly terminusCrs: string;
+  readonly terminusArrival: number;
+}
+
+/**
+ * Services departing a station within a time window, each paired with the CRS
+ * and arrival time of where it terminates. Used to discover an interchange
+ * when no direct origin->destination service exists (many SE branch services
+ * terminate at the junction where you change for London).
+ */
+export function originServiceTermini(
+  db: Database.Database,
+  originCrs: string,
+  date: string,
+  startMin: number,
+  windowMin: number,
+): OriginService[] {
+  const originTiplocs = tiplocsForCrs(db, originCrs);
+  if (originTiplocs.length === 0) return [];
+  const placeholders = originTiplocs.map(() => '?').join(',');
+
+  interface Row extends ScheduleRow {
+    readonly origin_departure: number;
+    readonly terminus_crs: string;
+    readonly terminus_arrival: number;
+  }
+
+  const rows = db
+    .prepare(
+      `
+      SELECT sc.id, sc.uid, sc.stp_indicator, sc.date_from, sc.date_to, sc.days_run, sc.category, sc.retail_train_id,
+             o.scheduled_departure AS origin_departure,
+             s.crs AS terminus_crs,
+             t.scheduled_arrival AS terminus_arrival
+      FROM schedules sc
+      JOIN calling_points o ON o.schedule_id = sc.id
+        AND o.tiploc IN (${placeholders}) AND o.scheduled_departure IS NOT NULL
+        AND o.scheduled_departure BETWEEN ? AND ?
+      JOIN calling_points t ON t.schedule_id = sc.id AND t.record_type = 'LT'
+      JOIN stations s ON s.tiploc = t.tiploc
+      WHERE s.crs IS NOT NULL AND t.scheduled_arrival IS NOT NULL AND t.seq > o.seq
+    `,
+    )
+    .all(...originTiplocs, startMin, startMin + windowMin) as Row[];
+
+  const resolved = resolveActive(rows.filter((r) => isActiveOnDate(r, date)));
+  return resolved
+    .filter((r) => r.terminus_crs !== originCrs)
+    .map((r) => ({
+      uid: r.uid,
+      originDeparture: r.origin_departure,
+      terminusCrs: r.terminus_crs,
+      terminusArrival: r.terminus_arrival,
+    }))
+    .sort((a, b) => a.originDeparture - b.originDeparture);
+}

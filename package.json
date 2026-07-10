@@ -13,6 +13,7 @@
     "load": "tsx src/parse/load.ts",
     "query": "tsx src/query.ts",
     "check": "tsx src/check.ts",
+    "batch": "tsx src/batch.ts",
     "test": "node --import tsx --test $(find src -name '*.test.ts')",
     "typecheck": "tsc --noEmit"
   },
