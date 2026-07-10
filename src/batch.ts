@@ -18,6 +18,7 @@ import { HspClient } from './hsp/client.js';
 import { assessCoupon } from './predict/assess.js';
 import { parseItineraryLegs, type RawItinerary } from './predict/itinerary.js';
 import { BatchDataProvider } from './predict/provider.js';
+import { findRteFile, loadRouteDefinitions, type RouteDefinition } from './predict/routes.js';
 import { extractConstraints, groupByCoupon, normaliseScans, type RawScan } from './predict/scans.js';
 import type { CouponType, CouponVerdict, IntendedLeg, PlannedItinerary, ScanEvent, TicketInfo } from './predict/types.js';
 import { parseHHMM } from './timetable/lookup.js';
@@ -56,8 +57,14 @@ function exitFor(constraints: ReturnType<typeof extractConstraints>, crs: string
   return constraints.exit && constraints.exit.crs === crs ? constraints.exit.timeMinutes : null;
 }
 
-async function assessTicket(raw: RawTicket, db: ReturnType<typeof openDb>, hsp: HspClient): Promise<CouponVerdict[]> {
+async function assessTicket(
+  raw: RawTicket,
+  db: ReturnType<typeof openDb>,
+  hsp: HspClient,
+  routes: Map<string, RouteDefinition>,
+): Promise<CouponVerdict[]> {
   const provider = new BatchDataProvider(db, hsp, raw.StartDate);
+  const routeDef = raw.RouteCode ? routes.get(raw.RouteCode) ?? null : null;
   const rawScans = (raw.Scans ?? []).map((s) => s.Scan);
   const scans: ScanEvent[] = normaliseScans(rawScans, (nlc) => provider.nlcToCrs(nlc));
   const meta = provider.ticketMeta(raw.FTOT);
@@ -124,7 +131,7 @@ async function assessTicket(raw: RawTicket, db: ReturnType<typeof openDb>, hsp: 
         continue;
       }
 
-      verdicts.push(assessCoupon({ ticket, coupon, fromCrs, toCrs, constraints, itineraries, bookedLegs }));
+      verdicts.push(assessCoupon({ ticket, coupon, fromCrs, toCrs, constraints, itineraries, bookedLegs, routeDef }));
     } catch (err) {
       verdicts.push(unresolved(coupon, 'NO_HSP_DATA_YET', `HSP lookup failed: ${(err as Error).message}`));
     }
@@ -171,6 +178,10 @@ async function main(): Promise<void> {
   const db = openDb(DB_PATH);
   const hsp = new HspClient({ username, password });
 
+  const rteFile = await findRteFile(path.join('data', 'fares'));
+  const routes = rteFile ? await loadRouteDefinitions(rteFile) : new Map<string, RouteDefinition>();
+  if (!rteFile) console.log('Note: no .RTE file found in data/fares - route codes will not be checked.\n');
+
   const files = (await readdir(dir)).filter((f) => f.endsWith('.json') && f !== 'results.json').sort();
   const results: { utn: string; coupons: CouponVerdict[] }[] = [];
 
@@ -180,7 +191,7 @@ async function main(): Promise<void> {
   for (const file of files) {
     const json = JSON.parse(await readFile(path.join(dir, file), 'utf8')) as unknown;
     for (const ticket of extractTickets(json)) {
-      const coupons = await assessTicket(ticket, db, hsp);
+      const coupons = await assessTicket(ticket, db, hsp, routes);
       results.push({ utn: ticket.UTN, coupons });
       for (const v of coupons) {
         const delay = v.delayMinutes === null ? '-' : `${v.delayMinutes}m`;

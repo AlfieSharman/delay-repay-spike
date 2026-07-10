@@ -8,6 +8,7 @@
  */
 
 import { parseHHMM } from '../timetable/lookup.js';
+import { HS1_STATIONS, type RouteDefinition } from './routes.js';
 import type { IntendedLeg, JourneyConstraints, PredictedLeg, TicketInfo } from './types.js';
 
 export interface ValidityResult {
@@ -20,11 +21,17 @@ export interface ValidityResult {
 /** Reason codes from the scanning system that indicate invalid travel. */
 const INVALID_TRAVEL_REASON_CODES = new Set(['INCTIM']);
 
+/** True if any leg of the journey ran on High Speed 1. */
+function usedHighSpeed(legs: readonly PredictedLeg[]): boolean {
+  return legs.some((l) => HS1_STATIONS.has(l.originCrs) || HS1_STATIONS.has(l.destinationCrs));
+}
+
 export function assessValidity(
   ticket: TicketInfo,
   constraints: JourneyConstraints,
   predictedLegs: readonly PredictedLeg[],
   bookedLegs: readonly IntendedLeg[] | null,
+  routeDef: RouteDefinition | null = null,
 ): ValidityResult {
   const anomalies: string[] = [];
   let reason: string | null = null;
@@ -59,6 +66,18 @@ export function assessValidity(
   // Reason-code anomalies from the scans.
   for (const code of scanReasonCodes(constraints)) {
     if (INVALID_TRAVEL_REASON_CODES.has(code) && !reason) reason = 'INVALID_TICKET_FOR_SERVICE';
+  }
+
+  // Route code: enforce the High Speed distinction; flag the rest for review.
+  if (routeDef) {
+    if (routeDef.category === 'hs1-excluded' && usedHighSpeed(predictedLegs)) {
+      if (!reason) reason = 'ROUTE_NOT_PERMITTED';
+      anomalies.push(
+        `Route ${routeDef.code} (${routeDef.description}) does not permit High Speed, but the journey used HS1 (St Pancras / Ebbsfleet / Stratford International)`,
+      );
+    } else if (routeDef.category === 'other') {
+      anomalies.push(`Route ${routeDef.code} (${routeDef.description || 'unknown'}) not automatically verified`);
+    }
   }
 
   // Off-Peak time restrictions are not machine-checked yet.

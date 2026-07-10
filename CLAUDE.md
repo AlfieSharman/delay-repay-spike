@@ -158,10 +158,14 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
   This is heuristic - confidence caps at PROBABLE and it should be reviewed.
   Supplying the customer's planned itinerary (embedded `Itinerary` block)
   removes the guesswork entirely.
-- **Route code is read (`ticket.routeCode`) but not yet enforced.** Filtering
-  candidate services to the paths a route code permits needs the NRDP routeing
-  guide parsed (downloaded, not loaded) - a separate piece of work, like the
-  RST restriction data.
+- **Route code is pragmatically enforced, not fully.** `src/predict/routes.ts`
+  parses the fares `.RTE` descriptions and classifies each code
+  (any-permitted / hs1-excluded / hs1-included / other). The engine rejects a
+  journey that used High Speed (a leg to/from St Pancras, Ebbsfleet or
+  Stratford International) on an `hs1-excluded` ticket, and flags codes it
+  can't classify as "not verified" rather than passing them. Full permitted-
+  route validation (the NRDP routeing guide, the `RGx` feed - downloaded, not
+  parsed) is a deliberately deferred, much larger piece.
 
 ## Conventions
 

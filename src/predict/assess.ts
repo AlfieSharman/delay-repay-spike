@@ -14,6 +14,7 @@ import type { Journey, Leg, ServiceRun } from '../eligibility/journey.js';
 import { formatMinutes } from '../timetable/lookup.js';
 import { compensationPence } from './compensation.js';
 import { resolveBest } from './resolve.js';
+import type { RouteDefinition } from './routes.js';
 import { assessValidity } from './validity.js';
 import type {
   Confidence,
@@ -40,6 +41,8 @@ export interface AssessCouponInput {
   readonly itineraries: readonly PlannedItinerary[];
   /** Booked legs for an Advance ticket, else null. */
   readonly bookedLegs: readonly IntendedLeg[] | null;
+  /** Route-code definition for the ticket, if resolved. */
+  readonly routeDef?: RouteDefinition | null;
   readonly threshold?: number;
   readonly interchangeMinutes?: number;
 }
@@ -142,7 +145,7 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
   }
 
   const eligibility = assessEligibility(journey, itinerary.candidatesByLeg);
-  const validity = assessValidity(ticket, constraints, predictedLegs, bookedLegs);
+  const validity = assessValidity(ticket, constraints, predictedLegs, bookedLegs, input.routeDef ?? null);
 
   // Confidence from how well the taps and train_info line up.
   const directionAnomaly = constraints.onTrain.some((t) => t.routeToCrs === fromCrs);
