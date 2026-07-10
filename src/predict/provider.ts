@@ -137,6 +137,23 @@ export class BatchDataProvider {
     return runs.sort((a, b) => a.scheduledDeparture - b.scheduledDeparture);
   }
 
+  /**
+   * Builds a PlannedItinerary from an explicit set of legs (the customer's
+   * planned itinerary), fetching the actual runs for each leg from HSP. The
+   * final leg's window extends to the exit tap so a later service taken after
+   * a cancellation is included.
+   */
+  async itineraryActuals(legs: readonly IntendedLeg[], exitMin: number | null): Promise<PlannedItinerary> {
+    const candidatesByLeg: ServiceRun[][] = [];
+    for (let i = 0; i < legs.length; i++) {
+      const leg = legs[i]!;
+      const isLast = i === legs.length - 1;
+      const toTime = isLast && exitMin !== null ? Math.max(exitMin, leg.scheduledArrival) : leg.scheduledDeparture + 90;
+      candidatesByLeg.push(await this.legActuals(leg.originCrs, leg.destinationCrs, leg.scheduledDeparture - 20, toTime));
+    }
+    return { legs: [...legs], candidatesByLeg };
+  }
+
   /** Builds the booked itinerary for an Advance ticket (inferred if needed). */
   async advanceItinerary(
     fromCrs: string,

@@ -126,6 +126,10 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
 - `src/predict/provider.ts` - the impure data layer for the batch runner:
   resolves NLCs/fare groups and ticket metadata from SQLite, and builds
   candidate itineraries from the timetable + HSP (direct, or one interchange).
+- `src/predict/itinerary.ts` - parses a customer's planned itinerary when it is
+  embedded in the ticket export (`Itinerary` block, legs per coupon). When
+  present it pins the legs and interchange directly, so prediction does not
+  have to infer them.
 - `src/batch.ts` - `npm run batch -- <dir>`: reads ticketing-export JSON files,
   runs the pipeline, prints a verdict per coupon and writes `results.json`.
 
@@ -152,6 +156,12 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
   tap the planner anchors on it and works backwards to find the interchange and
   first leg; the intended baseline is the earliest scheduled onward connection.
   This is heuristic - confidence caps at PROBABLE and it should be reviewed.
+  Supplying the customer's planned itinerary (embedded `Itinerary` block)
+  removes the guesswork entirely.
+- **Route code is read (`ticket.routeCode`) but not yet enforced.** Filtering
+  candidate services to the paths a route code permits needs the NRDP routeing
+  guide parsed (downloaded, not loaded) - a separate piece of work, like the
+  RST restriction data.
 
 ## Conventions
 

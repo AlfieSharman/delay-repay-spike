@@ -16,6 +16,7 @@ import path from 'node:path';
 import { openDb } from './db/schema.js';
 import { HspClient } from './hsp/client.js';
 import { assessCoupon } from './predict/assess.js';
+import { parseItineraryLegs, type RawItinerary } from './predict/itinerary.js';
 import { BatchDataProvider } from './predict/provider.js';
 import { extractConstraints, groupByCoupon, normaliseScans, type RawScan } from './predict/scans.js';
 import type { CouponType, CouponVerdict, IntendedLeg, PlannedItinerary, ScanEvent, TicketInfo } from './predict/types.js';
@@ -31,6 +32,8 @@ interface RawTicket {
   readonly purchase_price: number;
   readonly StartDate: string;
   readonly TimeValidFrom?: string;
+  readonly RouteCode?: string;
+  readonly Itinerary?: readonly RawItinerary[];
   readonly Scans?: readonly { readonly Scan: RawScan }[];
 }
 
@@ -68,7 +71,7 @@ async function assessTicket(raw: RawTicket, db: ReturnType<typeof openDb>, hsp: 
     ftot: raw.FTOT,
     originNlc: raw.OriginNLC,
     destinationNlc: raw.DestinationNLC,
-    routeCode: null,
+    routeCode: raw.RouteCode ?? null,
     pricePence: raw.purchase_price,
     startDate: raw.StartDate,
     timeValidFrom,
@@ -94,7 +97,13 @@ async function assessTicket(raw: RawTicket, db: ReturnType<typeof openDb>, hsp: 
       let itineraries: PlannedItinerary[];
       let bookedLegs: IntendedLeg[] | null = null;
 
-      if (meta.kind === 'advance') {
+      const plannedLegs = parseItineraryLegs(raw.Itinerary, coupon);
+      if (plannedLegs) {
+        // Use the customer's planned itinerary: it pins the legs directly.
+        itineraries = [await provider.itineraryActuals(plannedLegs, exitFor(constraints, toCrs))];
+        bookedLegs = meta.kind === 'advance' ? plannedLegs : null;
+      } else if (meta.kind === 'advance') {
+        // No itinerary supplied: infer the booked service from TimeValidFrom.
         const bookedDeparture = timeValidFrom
           ? parseHHMM(timeValidFrom.replace(':', ''))
           : entryFor(constraints, fromCrs) ?? 12 * 60;
