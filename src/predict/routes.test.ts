@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { assessCoupon } from './assess.js';
-import { classifyRoute, parseRouteRecord } from './routes.js';
+import { classifyRoute, parseRouteLocationRecord, parseRouteRecord } from './routes.js';
 import type { IntendedLeg, JourneyConstraints, PlannedItinerary, TicketInfo } from './types.js';
 import type { ServiceRun } from '../eligibility/journey.js';
 
@@ -19,6 +19,14 @@ test('parseRouteRecord reads code and short description from an RR line', () => 
   assert.equal(def!.code, '00130');
   assert.equal(def!.description, 'NOT VALID ON HS1');
   assert.equal(def!.category, 'hs1-excluded');
+});
+
+test('parseRouteLocationRecord reads code, CRS and include/exclude flag', () => {
+  // route 00130 excludes Ebbsfleet; route 00790 includes City Thameslink.
+  const excl = parseRouteLocationRecord('RL001303112299970 5566EBDE');
+  assert.deepEqual(excl, { code: '00130', crs: 'EBD', exclude: true });
+  const incl = parseRouteLocationRecord('RL007903112299970 5121CTKI');
+  assert.deepEqual(incl, { code: '00790', crs: 'CTK', exclude: false });
 });
 
 function ticket(kind: 'advance' | 'walk-up'): TicketInfo {
@@ -44,7 +52,7 @@ test('HS1-excluded route on a High Speed journey is not permitted', () => {
   const v = assessCoupon({
     ticket: ticket('walk-up'), coupon: 'Single', fromCrs: 'EBD', toCrs: 'STP', constraints,
     itineraries: [itin], bookedLegs: null,
-    routeDef: { code: '00130', description: 'NOT VALID ON HS1', category: 'hs1-excluded' },
+    routeDef: { code: '00130', description: 'NOT VALID ON HS1', category: 'hs1-excluded', includeLocations: [], excludeLocations: ['EBD', 'SFA'] },
   });
   // Delayed 20 min, but the ticket wasn't valid on HS1, so not entitled.
   assert.equal(v.entitled, false);

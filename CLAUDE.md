@@ -165,14 +165,23 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
   This is heuristic - confidence caps at PROBABLE and it should be reviewed.
   Supplying the customer's planned itinerary (embedded `Itinerary` block)
   removes the guesswork entirely.
-- **Route code is pragmatically enforced, not fully.** `src/predict/routes.ts`
-  parses the fares `.RTE` descriptions and classifies each code
-  (any-permitted / hs1-excluded / hs1-included / other). The engine rejects a
-  journey that used High Speed (a leg to/from St Pancras, Ebbsfleet or
-  Stratford International) on an `hs1-excluded` ticket, and flags codes it
-  can't classify as "not verified" rather than passing them. Full permitted-
-  route validation (the NRDP routeing guide, the `RGx` feed - downloaded, not
-  parsed) is a deliberately deferred, much larger piece.
+- **Route code is enforced from the real include/exclude locations, not just a
+  description.** `src/predict/routes.ts` parses the fares `.RTE` `R` (description)
+  and `L` (Route Include/Exclude Locations, RSPS5045 4.20.3) records. Validity
+  applies RSPS5047 9.1: the journey must not call at any "exclude" location and
+  must call at every "include" location, checked against the service's calling
+  points (now captured from HSP - `ServiceRun.callingPoints`).
+  - **HS1 is detected via Ebbsfleet / Stratford International (HS1-only), NOT
+    St Pancras.** St Pancras has both HS1 and classic (Thameslink) platforms,
+    so a journey ending there is HS1-*capable* but not certainly HS1; an
+    `hs1-excluded` ticket to St Pancras is flagged for review, not rejected.
+    This was caught by the Odyssey oracle (a via-London-Bridge Gravesend->St
+    Pancras journey legitimately sells the not-HS1 fare).
+  - "Must include" locations that are passing (not stopping) points can't be
+    confirmed from HSP stops yet, so they're flagged rather than failed.
+  - Full permitted-route validation (does the journey follow a permitted map
+    sequence at all - the `RGx` routeing guide, RSPS5047 7-9) is the next
+    increment; see `src/routeing/`.
 
 ## Conventions
 

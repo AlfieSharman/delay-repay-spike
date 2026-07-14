@@ -95,6 +95,8 @@ export interface PredictedLeg {
   readonly actualDeparture: number | null;
   readonly actualArrival: number | null;
   readonly cancelled: boolean;
+  /** CRS codes the leg called at, origin to destination inclusive (from HSP). */
+  readonly callingPoints: readonly string[];
 }
 
 /** The final per-coupon verdict returned to the caller. */

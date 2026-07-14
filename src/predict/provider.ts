@@ -115,10 +115,17 @@ export class BatchDataProvider {
         seen.add(rid);
         const details = await this.hsp.serviceDetails(rid);
         const locations = details.serviceAttributesDetails.locations;
-        const originLoc = locations.find((l) => l.location === fromCrs);
-        const destLoc = locations.find((l) => l.location === toCrs);
+        const originIdx = locations.findIndex((l) => l.location === fromCrs);
+        const destIdx = locations.findIndex((l) => l.location === toCrs);
+        const originLoc = originIdx >= 0 ? locations[originIdx] : undefined;
+        const destLoc = destIdx >= 0 ? locations[destIdx] : undefined;
         const actualDeparture = hspTime(originLoc?.actual_td);
         const actualArrival = hspTime(destLoc?.actual_ta);
+        // Calling points ridden: origin..destination inclusive (CRS codes).
+        const callingPoints =
+          originIdx >= 0 && destIdx > originIdx
+            ? locations.slice(originIdx, destIdx + 1).map((l) => l.location)
+            : [fromCrs, toCrs];
         // Normalise past-midnight arrivals: an arrival earlier than the
         // departure means the service crossed midnight, so it is +1 day.
         const schedArr = scheduledArrival < scheduledDeparture ? scheduledArrival + 1440 : scheduledArrival;
@@ -131,6 +138,7 @@ export class BatchDataProvider {
           actualDeparture,
           actualArrival: actArr,
           cancelled: actualArrival === null,
+          callingPoints,
         });
       }
     }
