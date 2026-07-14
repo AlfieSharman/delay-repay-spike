@@ -32,6 +32,9 @@ export function assessValidity(
   predictedLegs: readonly PredictedLeg[],
   bookedLegs: readonly IntendedLeg[] | null,
   routeDef: RouteDefinition | null = null,
+  /** Maps a CRS to its routeing point(s)/group, so "via" checks work at group
+   *  level (e.g. any London terminal counts as "via London"). */
+  resolveRouteingPoints?: (crs: string) => string[],
 ): ValidityResult {
   const anomalies: string[] = [];
   let reason: string | null = null;
@@ -75,34 +78,39 @@ export function assessValidity(
   // review rather than failed.
   if (routeDef) {
     const stations = journeyStations(predictedLegs);
-    const usedHS1 = [...stations].some((c) => HS1_STATIONS.has(c));
-    const toStPancras = predictedLegs.some((l) => l.destinationCrs === ST_PANCRAS);
+    // A location and the routeing point(s)/group it belongs to, so a "via"
+    // check matches at group level (any London terminal -> London group G01).
+    const expand = (crs: string): string[] => (resolveRouteingPoints ? [crs, ...resolveRouteingPoints(crs)] : [crs]);
+    const journeySet = new Set([...stations].flatMap(expand));
+    const passesThrough = (loc: string): boolean => expand(loc).some((x) => journeySet.has(x));
+
+    // Must-not-pass-through locations the journey travelled via.
+    const viaExcluded = routeDef.excludeLocations.filter(passesThrough);
+    const hs1Hit = viaExcluded.filter((c) => HS1_STATIONS.has(c));
+    const otherHit = viaExcluded.filter((c) => !HS1_STATIONS.has(c));
+    if (viaExcluded.length > 0 && !reason) reason = 'ROUTE_NOT_PERMITTED';
+    if (hs1Hit.length > 0) {
+      anomalies.push(
+        `Route ${routeDef.code} (${routeDef.description}) does not permit High Speed, but the journey used HS1 (${hs1Hit.join(', ')})`,
+      );
+    }
+    if (otherHit.length > 0) {
+      anomalies.push(`Route ${routeDef.code} (${routeDef.description}): journey travelled via excluded location(s) ${otherHit.join(', ')}`);
+    }
+
+    // St Pancras is HS1-capable but ambiguous on stops (HS1 or Thameslink); if
+    // an HS1-excluded ticket ends there and we didn't confirm HS1 above, flag it.
     const hs1Excluded =
       routeDef.category === 'hs1-excluded' || routeDef.excludeLocations.some((c) => HS1_STATIONS.has(c));
-
-    if (hs1Excluded && usedHS1) {
-      // Confirmed High Speed (called at Ebbsfleet / Stratford International).
-      if (!reason) reason = 'ROUTE_NOT_PERMITTED';
-      anomalies.push(
-        `Route ${routeDef.code} (${routeDef.description}) does not permit High Speed, but the journey used HS1 (Ebbsfleet / Stratford International)`,
-      );
-    } else if (hs1Excluded && toStPancras) {
-      // St Pancras can be reached via HS1 or classic (Thameslink); can't tell
-      // from stops alone whether this breached the ticket.
+    const toStPancras = predictedLegs.some((l) => l.destinationCrs === ST_PANCRAS);
+    if (hs1Excluded && toStPancras && hs1Hit.length === 0) {
       anomalies.push(
         `Route ${routeDef.code} (${routeDef.description}): journey ends at St Pancras, which is HS1-capable; can't confirm from stops whether HS1 was used`,
       );
     }
 
-    // Other "must not pass through" locations seen on the journey.
-    const viaExcluded = routeDef.excludeLocations.filter((c) => !HS1_STATIONS.has(c) && stations.has(c));
-    if (viaExcluded.length > 0) {
-      if (!reason) reason = 'ROUTE_NOT_PERMITTED';
-      anomalies.push(`Route ${routeDef.code} (${routeDef.description}): journey travelled via excluded location(s) ${viaExcluded.join(', ')}`);
-    }
-
-    // "Must include" locations not seen on the journey's stops.
-    const unconfirmedIncludes = routeDef.includeLocations.filter((c) => !stations.has(c));
+    // Must-include locations we can't confirm from the stops we have.
+    const unconfirmedIncludes = routeDef.includeLocations.filter((c) => !passesThrough(c));
     if (unconfirmedIncludes.length > 0) {
       anomalies.push(
         `Route ${routeDef.code} (${routeDef.description}) requires travel via ${unconfirmedIncludes.join(', ')}; not confirmed from available stops (passing points not loaded)`,

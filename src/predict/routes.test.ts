@@ -42,6 +42,42 @@ function at(hhmm: string): number {
   return h! * 60 + m!;
 }
 
+// Group-level "via" check (increment 3): a NOT-VIA-LONDON ticket (route 00700,
+// exclude Euston) is valid on a journey that avoids London but not on one via a
+// London terminal - matching the Dover->Brighton Odyssey example, where the
+// cheap 00700 fare is only sold on the via-Ashford journey.
+test('NOT VIA LONDON is invalid via any London terminal, valid when avoided', () => {
+  // London terminals all resolve to group G01; other stations to themselves.
+  const london = new Set(['EUS', 'VIC', 'STP', 'LBG', 'CST', 'CHX']);
+  const resolve = (crs: string): string[] => (london.has(crs) ? ['G01'] : [crs]);
+  const notViaLondon = {
+    code: '00700', description: 'NOT VIA LONDON', category: 'other' as const,
+    includeLocations: [], excludeLocations: ['EUS'],
+  };
+  const assess = (calling: string[]) => {
+    const runs: ServiceRun[] = [
+      { id: 's', scheduledDeparture: at('06:48'), scheduledArrival: at('09:39'), actualDeparture: at('06:48'), actualArrival: at('09:39'), cancelled: false, callingPoints: calling },
+    ];
+    const itin: PlannedItinerary = {
+      legs: [{ originCrs: calling[0]!, destinationCrs: calling[calling.length - 1]!, scheduledDeparture: at('06:48'), scheduledArrival: at('09:39') }],
+      candidatesByLeg: [runs],
+    };
+    const constraints: JourneyConstraints = { coupon: 'Single', onTrain: [], anomalies: [] };
+    return assessCoupon({
+      ticket: { ...ticket('walk-up'), routeCode: '00700' }, coupon: 'Single',
+      fromCrs: calling[0]!, toCrs: calling[calling.length - 1]!, constraints,
+      itineraries: [itin], bookedLegs: null, routeDef: notViaLondon, resolveRouteingPoints: resolve,
+    });
+  };
+
+  const viaAshford = assess(['DVP', 'AFK', 'HMD', 'BTN']); // avoids London
+  assert.notEqual(viaAshford.reason, 'ROUTE_NOT_PERMITTED');
+
+  const viaVictoria = assess(['DVP', 'VIC', 'BTN']); // through London Victoria
+  assert.equal(viaVictoria.reason, 'ROUTE_NOT_PERMITTED');
+  assert.ok(viaVictoria.anomalies.some((a) => /excluded location/.test(a)));
+});
+
 // A ticket flagged NOT VALID ON HS1, used on a High Speed service to St Pancras.
 test('HS1-excluded route on a High Speed journey is not permitted', () => {
   const runs: ServiceRun[] = [

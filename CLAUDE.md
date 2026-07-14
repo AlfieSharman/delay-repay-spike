@@ -177,6 +177,13 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
     `hs1-excluded` ticket to St Pancras is flagged for review, not rejected.
     This was caught by the Odyssey oracle (a via-London-Bridge Gravesend->St
     Pancras journey legitimately sells the not-HS1 fare).
+  - **"Via" checks are done at routeing-point/group level, not raw CRS.** The
+    batch passes `RouteingGuide.routeingPointsFor` into validity so, e.g., a
+    "NOT VIA LONDON" code (exclude Euston) correctly rejects a journey via any
+    London terminal (all resolve to group G01), not just via Euston. Validated
+    against the Dover->Brighton Odyssey example (the cheap not-via-London fare
+    is sold only on the via-Ashford journey, not the via-St Pancras/Victoria
+    ones).
   - "Must include" locations that are passing (not stopping) points can't be
     confirmed from HSP stops yet, so they're flagged rather than failed.
   - Full permitted-route validation (does the journey follow a permitted map

@@ -20,6 +20,7 @@ import { parseItineraryLegs, type RawItinerary } from './predict/itinerary.js';
 import { BatchDataProvider } from './predict/provider.js';
 import { findRteFile, loadRouteDefinitions, type RouteDefinition } from './predict/routes.js';
 import { extractConstraints, groupByCoupon, normaliseScans, type RawScan } from './predict/scans.js';
+import { RouteingGuide } from './routeing/guide.js';
 import type { CouponType, CouponVerdict, IntendedLeg, PlannedItinerary, ScanEvent, TicketInfo } from './predict/types.js';
 import { parseHHMM } from './timetable/lookup.js';
 
@@ -62,9 +63,11 @@ async function assessTicket(
   db: ReturnType<typeof openDb>,
   hsp: HspClient,
   routes: Map<string, RouteDefinition>,
+  guide: RouteingGuide | null,
 ): Promise<CouponVerdict[]> {
   const provider = new BatchDataProvider(db, hsp, raw.StartDate);
   const routeDef = raw.RouteCode ? routes.get(raw.RouteCode) ?? null : null;
+  const resolveRouteingPoints = guide ? (crs: string): string[] => guide.routeingPointsFor(crs) : undefined;
   const rawScans = (raw.Scans ?? []).map((s) => s.Scan);
   const scans: ScanEvent[] = normaliseScans(rawScans, (nlc) => provider.nlcToCrs(nlc));
   const meta = provider.ticketMeta(raw.FTOT);
@@ -131,7 +134,9 @@ async function assessTicket(
         continue;
       }
 
-      verdicts.push(assessCoupon({ ticket, coupon, fromCrs, toCrs, constraints, itineraries, bookedLegs, routeDef }));
+      verdicts.push(
+        assessCoupon({ ticket, coupon, fromCrs, toCrs, constraints, itineraries, bookedLegs, routeDef, resolveRouteingPoints }),
+      );
     } catch (err) {
       verdicts.push(unresolved(coupon, 'NO_HSP_DATA_YET', `HSP lookup failed: ${(err as Error).message}`));
     }
@@ -182,6 +187,11 @@ async function main(): Promise<void> {
   const routes = rteFile ? await loadRouteDefinitions(rteFile) : new Map<string, RouteDefinition>();
   if (!rteFile) console.log('Note: no .RTE file found in data/fares - route codes will not be checked.\n');
 
+  const guide = await RouteingGuide.load().catch(() => {
+    console.log('Note: routeing guide not loaded - "via" checks will use raw station codes only.\n');
+    return null;
+  });
+
   const files = (await readdir(dir)).filter((f) => f.endsWith('.json') && f !== 'results.json').sort();
   const results: { utn: string; coupons: CouponVerdict[] }[] = [];
 
@@ -191,7 +201,7 @@ async function main(): Promise<void> {
   for (const file of files) {
     const json = JSON.parse(await readFile(path.join(dir, file), 'utf8')) as unknown;
     for (const ticket of extractTickets(json)) {
-      const coupons = await assessTicket(ticket, db, hsp, routes);
+      const coupons = await assessTicket(ticket, db, hsp, routes, guide);
       results.push({ utn: ticket.UTN, coupons });
       for (const v of coupons) {
         const delay = v.delayMinutes === null ? '-' : `${v.delayMinutes}m`;

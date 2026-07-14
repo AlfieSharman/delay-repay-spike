@@ -43,6 +43,8 @@ export interface AssessCouponInput {
   readonly bookedLegs: readonly IntendedLeg[] | null;
   /** Route-code definition for the ticket, if resolved. */
   readonly routeDef?: RouteDefinition | null;
+  /** Maps a CRS to its routeing point(s)/group, for group-level "via" checks. */
+  readonly resolveRouteingPoints?: (crs: string) => string[];
   readonly threshold?: number;
   readonly interchangeMinutes?: number;
 }
@@ -145,7 +147,14 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
   }
 
   const eligibility = assessEligibility(journey, itinerary.candidatesByLeg);
-  const validity = assessValidity(ticket, constraints, predictedLegs, bookedLegs, input.routeDef ?? null);
+  const validity = assessValidity(
+    ticket,
+    constraints,
+    predictedLegs,
+    bookedLegs,
+    input.routeDef ?? null,
+    input.resolveRouteingPoints,
+  );
 
   // Confidence from how well the taps and train_info line up.
   const directionAnomaly = constraints.onTrain.some((t) => t.routeToCrs === fromCrs);
