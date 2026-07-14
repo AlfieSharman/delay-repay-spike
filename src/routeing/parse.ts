@@ -70,6 +70,29 @@ export async function loadRouteingPoints(dir: string): Promise<Set<string>> {
   return set;
 }
 
+/** Node-to-node map links from the routeing guide (RSPS5047 4.7). */
+export interface LinkData {
+  /** "A>B" -> the map codes on which nodes A and B are directly linked. */
+  readonly mapsByPair: Map<string, Set<string>>;
+  /** Map code -> the set of nodes that appear on that map. */
+  readonly nodesByMap: Map<string, Set<string>>;
+}
+
+export async function loadLinks(dir: string): Promise<LinkData> {
+  const mapsByPair = new Map<string, Set<string>>();
+  const nodesByMap = new Map<string, Set<string>>();
+  for (const line of await dataLines(await findByExtension(dir, '.RGL'))) {
+    const [a, b, mapCode] = line.split(',');
+    if (!a || !b || !mapCode) continue;
+    const pair = `${a}>${b}`;
+    (mapsByPair.get(pair) ?? mapsByPair.set(pair, new Set()).get(pair)!).add(mapCode);
+    const nodes = nodesByMap.get(mapCode) ?? nodesByMap.set(mapCode, new Set()).get(mapCode)!;
+    nodes.add(a);
+    nodes.add(b);
+  }
+  return { mapsByPair, nodesByMap };
+}
+
 /**
  * Permitted routes between routeing-point pairs (RSPS5047 4.8.2). Keyed
  * "START>END"; each value is a list of permitted map sequences (each an

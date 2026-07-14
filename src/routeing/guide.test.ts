@@ -43,6 +43,32 @@ test('permittedRoutes returns the map sequences between the routeing points', ()
   assert.deepEqual(sequences.sort(), ['AF', 'AR,TN', 'HS']);
 });
 
+test('followsPermittedRoute accepts a path on the map sequence and rejects one off it', () => {
+  // Permitted route A->B is [M1, M2], changing maps at X. Y is off-route.
+  const g = new RouteingGuide(
+    new Map<string, StationRouteing>([
+      ['A', { routeingPoints: [], group: null }],
+      ['B', { routeingPoints: [], group: null }],
+      ['X', { routeingPoints: [], group: null }],
+      ['Y', { routeingPoints: [], group: null }],
+    ]),
+    new Map(),
+    new Set(['A', 'B', 'X', 'Y']),
+    new Map([['A>B', [['M1', 'M2']]]]),
+    {
+      mapsByPair: new Map(),
+      nodesByMap: new Map([
+        ['M1', new Set(['A', 'X'])],
+        ['M2', new Set(['X', 'B'])],
+        ['M3', new Set(['A', 'Y', 'B'])],
+      ]),
+    },
+  );
+  assert.deepEqual(g.followsPermittedRoute('A', 'B', ['X']).maps, ['M1', 'M2']); // on-route
+  assert.equal(g.followsPermittedRoute('A', 'B', ['Y']).permitted, false); // Y is off-route
+  assert.equal(g.followsPermittedRoute('A', 'B', []).permitted, true); // endpoints only: lenient
+});
+
 test('hasLondonRoute detects a permitted route consisting only of the London map', () => {
   const g = new RouteingGuide(
     new Map<string, StationRouteing>([

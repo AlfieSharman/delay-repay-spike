@@ -9,10 +9,12 @@
  */
 
 import {
+  loadLinks,
   loadPermittedRoutes,
   loadRouteingPoints,
   loadStationGroups,
   loadStations,
+  type LinkData,
   type StationRouteing,
 } from './parse.js';
 
@@ -29,16 +31,18 @@ export class RouteingGuide {
     private readonly groups: Map<string, string>,
     private readonly routeingPoints: Set<string>,
     private readonly permitted: Map<string, string[][]>,
+    private readonly links: LinkData = { mapsByPair: new Map(), nodesByMap: new Map() },
   ) {}
 
   static async load(dir = 'data/routeing'): Promise<RouteingGuide> {
-    const [stations, groups, routeingPoints, permitted] = await Promise.all([
+    const [stations, groups, routeingPoints, permitted, links] = await Promise.all([
       loadStations(dir),
       loadStationGroups(dir),
       loadRouteingPoints(dir),
       loadPermittedRoutes(dir),
+      loadLinks(dir),
     ]);
-    return new RouteingGuide(stations, groups, routeingPoints, permitted);
+    return new RouteingGuide(stations, groups, routeingPoints, permitted, links);
   }
 
   isRouteingPoint(code: string): boolean {
@@ -80,4 +84,64 @@ export class RouteingGuide {
   hasLondonRoute(originCrs: string, destinationCrs: string): boolean {
     return this.permittedRoutes(originCrs, destinationCrs).some((r) => r.maps.length === 1 && r.maps[0] === 'LO');
   }
+
+  /**
+   * Whether a journey's node path follows a permitted sequence of maps
+   * (RSPS5047 7.3.5). `viaNodes` is the ordered list of routeing-guide nodes
+   * the journey passes between origin and destination (its calling points that
+   * are routeing points / groups). Returns the matched map sequence if one
+   * accepts the path.
+   *
+   * The check is a conservative greedy trace: each node in the path must lie on
+   * the "current" map of a permitted sequence, advancing to the next map only
+   * when the node is not on the current one. Because our node path comes from
+   * stops (not the full geographical path), a match is trustworthy but a
+   * non-match means "not confirmed permitted" rather than "definitely barred".
+   */
+  followsPermittedRoute(
+    originCrs: string,
+    destinationCrs: string,
+    viaNodes: readonly string[],
+  ): { permitted: boolean; maps?: readonly string[] } {
+    const origins = this.routeingPointsFor(originCrs);
+    const dests = this.routeingPointsFor(destinationCrs);
+    // Resolve each via-station to the routeing-guide node/group it sits on
+    // (e.g. a London terminal -> G01), keeping only ones the guide knows.
+    const via = viaNodes.map((n) => this.asNode(n)).filter((n): n is string => n !== null);
+    for (const orp of origins) {
+      for (const drp of dests) {
+        const path = dedupeConsecutive([orp, ...via, drp]);
+        for (const maps of this.permitted.get(`${orp}>${drp}`) ?? []) {
+          if (this.pathFitsMapSequence(path, maps)) return { permitted: true, maps };
+        }
+      }
+    }
+    return { permitted: false };
+  }
+
+  /** Greedy check that an ordered node path stays within a map sequence. */
+  private pathFitsMapSequence(path: readonly string[], maps: readonly string[]): boolean {
+    let mapIdx = 0;
+    for (const node of path) {
+      while (mapIdx < maps.length - 1 && !this.nodesOnMap(maps[mapIdx]!).has(node)) mapIdx += 1;
+      if (!this.nodesOnMap(maps[mapIdx]!).has(node)) return false;
+    }
+    return true;
+  }
+
+  private nodesOnMap(mapCode: string): ReadonlySet<string> {
+    return this.links.nodesByMap.get(mapCode) ?? EMPTY_SET;
+  }
+
+  /** A station's routeing-guide node: itself if a routeing point, else its group. */
+  private asNode(crs: string): string | null {
+    if (this.isRouteingPoint(crs)) return crs;
+    return this.routeingPointsFor(crs).find((rp) => this.isRouteingPoint(rp)) ?? null;
+  }
+}
+
+const EMPTY_SET: ReadonlySet<string> = new Set();
+
+function dedupeConsecutive(path: readonly string[]): string[] {
+  return path.filter((v, i) => i === 0 || v !== path[i - 1]);
 }

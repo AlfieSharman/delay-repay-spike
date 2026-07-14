@@ -26,12 +26,20 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
    validity, and produce a Delay Repay verdict. See `src/predict/`, `src/batch.ts`
    and the algorithm in `docs/service-prediction.md`.
 5. **National Routeing Guide** (in progress) - parse the routeing feed and
-   validate whether a journey's route is permitted for the ticket. See
-   `src/routeing/`. First increment: parse the feed and look up permitted
-   routes between two stations (`npm run routes`). Record layouts and the
-   validation rules are RSPS5047 (in the RGD spec set). Route-code filtering
-   (HS1 etc.) and the full rule engine (shortest-route margin, map-sequence
-   validation, easements, zonal London) are the next increments.
+   validate whether a journey's route is permitted. See `src/routeing/`.
+   Record layouts and rules are RSPS5047 (in the RGD spec set).
+   - Done: parse the feed and look up permitted routes between two stations
+     (`npm run routes`); route-code include/exclude validity at
+     routeing-point/group level (wired into `src/predict/validity.ts`).
+   - Built but NOT wired as a gate: `RouteingGuide.followsPermittedRoute`, the
+     map-sequence tracer (RSPS5047 7.3.5). It is correct given an accurate node
+     path, but the journey's node path from HSP stops is too sparse to
+     discriminate routes in practice (it collapses to "a permitted route
+     exists", almost always true). Making base permitted-route validation
+     useful needs the geographical routeing points a service *passes* (from the
+     timetable/CIF, not just HSP stops) - or is the clearest case for calling
+     Odyssey rather than reproducing it. Shortest-route margin and easements
+     (RSPS5047 7.2 / 4.10) are further still.
 
 ### What phase 2 built
 
