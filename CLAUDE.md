@@ -25,6 +25,13 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
    its scan data, predict which service the customer travelled on, check
    validity, and produce a Delay Repay verdict. See `src/predict/`, `src/batch.ts`
    and the algorithm in `docs/service-prediction.md`.
+5. **National Routeing Guide** (in progress) - parse the routeing feed and
+   validate whether a journey's route is permitted for the ticket. See
+   `src/routeing/`. First increment: parse the feed and look up permitted
+   routes between two stations (`npm run routes`). Record layouts and the
+   validation rules are RSPS5047 (in the RGD spec set). Route-code filtering
+   (HS1 etc.) and the full rule engine (shortest-route margin, map-sequence
+   validation, easements, zonal London) are the next increments.
 
 ### What phase 2 built
 
@@ -193,6 +200,7 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
 | `npm run query -- <command>` | Sanity-check the loaded data. Commands: `stats`, `services <CRS> <YYYY-MM-DD>`, `fares <origin CRS> <dest CRS>`. |
 | `npm run check -- <origin CRS> <dest CRS> <YYYY-MM-DD> <dep HHMM>` | Simulate a customer's journey and print the Delay Repay verdict. Flags: `--via <CRS>`, `--advance` (default is a flexible ticket), `--return`, `--threshold <min>` (default 15), `--no-cache`. |
 | `npm run batch -- <dir>` | Read ticketing-export JSON files from a directory, predict the service travelled and print a Delay Repay verdict per coupon; writes `results.json`. Add `--verbose` for the full explanation trail. |
+| `npm run routes -- <origin CRS> <dest CRS>` | Print the routeing points and permitted routes (map sequences) between two stations, from the National Routeing Guide feed. `[High Speed]` marks routes using the HS1 map. |
 | `npm test` | Run the eligibility engine and prediction unit tests (`node:test`). |
 | `npm run typecheck` | `tsc --noEmit`. |
 
