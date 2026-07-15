@@ -133,8 +133,16 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
   leg and the scan constraints, pick which services the customer actually
   travelled on and grade the reconstruction (entry/exit tap fit).
 - `src/predict/validity.ts` - Advance booked-service enforcement, `TimeValidFrom`
-  and scan reason-code checks. Off-Peak restriction bands (RST data) are NOT
-  parsed yet, so those tickets get a "not verified" flag, never a false pass.
+  and scan reason-code checks.
+- `src/predict/restrictions.ts` - parses the RST time-restriction data
+  (RSPS5045 4.18: RH headers, TR time windows, TD date bands, TT TOC filters)
+  and evaluates whether an Off-Peak / Super Off-Peak ticket's restriction bars
+  the travelled service. Validated against the Odyssey Rochester responses (the
+  F4 "Super Off-Peak Day" code bars outward departures 04:00-09:59, so 09:32
+  is invalid and 10:02 valid). Pure evaluator, unit-tested. NOT yet wired into
+  the verdict (the next step is resolving a ticket's restriction code from the
+  fares table and passing the journey in); until then off-peak tickets still
+  get the "not verified" flag in validity.
 - `src/predict/assess.ts` - orchestrates one coupon: resolve -> eligibility
   engine -> validity -> confidence -> compensation. Pure; unit-tested end to
   end against the five real tickets in `predict.test.ts`.
