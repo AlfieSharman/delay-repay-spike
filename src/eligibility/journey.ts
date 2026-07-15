@@ -45,6 +45,8 @@ export interface ServiceRun {
   /** CRS codes this run calls at from origin to destination inclusive, when
    *  known (from HSP). Used for route-code via/exclude checks. */
   readonly callingPoints?: readonly string[];
+  /** Operating TOC code (from HSP), for TOC-limited restriction checks. */
+  readonly toc?: string;
 }
 
 export interface Journey {

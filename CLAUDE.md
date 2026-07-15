@@ -139,10 +139,13 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
   and evaluates whether an Off-Peak / Super Off-Peak ticket's restriction bars
   the travelled service. Validated against the Odyssey Rochester responses (the
   F4 "Super Off-Peak Day" code bars outward departures 04:00-09:59, so 09:32
-  is invalid and 10:02 valid). Pure evaluator, unit-tested. NOT yet wired into
-  the verdict (the next step is resolving a ticket's restriction code from the
-  fares table and passing the journey in); until then off-peak tickets still
-  get the "not verified" flag in validity.
+  is invalid and 10:02 valid). **Wired into the verdict**: the batch resolves a
+  ticket's restriction code from the fares table
+  (`BatchDataProvider.restrictionCodeFor`, flow + ticket type + route ->
+  `fare.restriction_code`) and validity evaluates it against the predicted
+  journey's departure/arrival, reason `RESTRICTION_NOT_VALID` when the ticket
+  wasn't valid on the service. Where the code can't be resolved unambiguously
+  it falls back to the "not verified" flag rather than guessing.
 - `src/predict/assess.ts` - orchestrates one coupon: resolve -> eligibility
   engine -> validity -> confidence -> compensation. Pure; unit-tested end to
   end against the five real tickets in `predict.test.ts`.

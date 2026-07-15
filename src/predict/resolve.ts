@@ -43,6 +43,7 @@ function toPredictedLeg(originCrs: string, destinationCrs: string, run: ServiceR
     actualArrival: run.actualArrival,
     cancelled: run.cancelled,
     callingPoints: run.callingPoints ?? [originCrs, destinationCrs],
+    toc: run.toc,
   };
 }
 

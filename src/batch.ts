@@ -18,6 +18,7 @@ import { HspClient } from './hsp/client.js';
 import { assessCoupon } from './predict/assess.js';
 import { parseItineraryLegs, type RawItinerary } from './predict/itinerary.js';
 import { BatchDataProvider } from './predict/provider.js';
+import { findRstFile, loadRestrictions, type RestrictionDefinition } from './predict/restrictions.js';
 import { findRteFile, loadRouteDefinitions, type RouteDefinition } from './predict/routes.js';
 import { extractConstraints, groupByCoupon, normaliseScans, type RawScan } from './predict/scans.js';
 import { RouteingGuide } from './routeing/guide.js';
@@ -64,10 +65,13 @@ async function assessTicket(
   hsp: HspClient,
   routes: Map<string, RouteDefinition>,
   guide: RouteingGuide | null,
+  restrictions: Map<string, RestrictionDefinition>,
 ): Promise<CouponVerdict[]> {
   const provider = new BatchDataProvider(db, hsp, raw.StartDate);
   const routeDef = raw.RouteCode ? routes.get(raw.RouteCode) ?? null : null;
   const resolveRouteingPoints = guide ? (crs: string): string[] => guide.routeingPointsFor(crs) : undefined;
+  const restrictionCode = provider.restrictionCodeFor(raw.OriginNLC, raw.DestinationNLC, raw.FTOT, raw.RouteCode ?? null);
+  const restrictionDef = restrictionCode ? restrictions.get(restrictionCode) ?? null : null;
   const rawScans = (raw.Scans ?? []).map((s) => s.Scan);
   const scans: ScanEvent[] = normaliseScans(rawScans, (nlc) => provider.nlcToCrs(nlc));
   const meta = provider.ticketMeta(raw.FTOT);
@@ -135,7 +139,7 @@ async function assessTicket(
       }
 
       verdicts.push(
-        assessCoupon({ ticket, coupon, fromCrs, toCrs, constraints, itineraries, bookedLegs, routeDef, resolveRouteingPoints }),
+        assessCoupon({ ticket, coupon, fromCrs, toCrs, constraints, itineraries, bookedLegs, routeDef, resolveRouteingPoints, restrictionDef }),
       );
     } catch (err) {
       verdicts.push(unresolved(coupon, 'NO_HSP_DATA_YET', `HSP lookup failed: ${(err as Error).message}`));
@@ -192,6 +196,10 @@ async function main(): Promise<void> {
     return null;
   });
 
+  const rstFile = await findRstFile(path.join('data', 'fares'));
+  const restrictions = rstFile ? await loadRestrictions(rstFile) : new Map<string, RestrictionDefinition>();
+  if (!rstFile) console.log('Note: no .RST file found - off-peak restrictions will not be checked.\n');
+
   const files = (await readdir(dir)).filter((f) => f.endsWith('.json') && f !== 'results.json').sort();
   const results: { utn: string; coupons: CouponVerdict[] }[] = [];
 
@@ -201,7 +209,7 @@ async function main(): Promise<void> {
   for (const file of files) {
     const json = JSON.parse(await readFile(path.join(dir, file), 'utf8')) as unknown;
     for (const ticket of extractTickets(json)) {
-      const coupons = await assessTicket(ticket, db, hsp, routes, guide);
+      const coupons = await assessTicket(ticket, db, hsp, routes, guide, restrictions);
       results.push({ utn: ticket.UTN, coupons });
       for (const v of coupons) {
         const delay = v.delayMinutes === null ? '-' : `${v.delayMinutes}m`;

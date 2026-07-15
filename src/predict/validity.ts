@@ -8,6 +8,7 @@
  */
 
 import { parseHHMM } from '../timetable/lookup.js';
+import { evaluateRestriction, type RestrictionDefinition, type RestrictionJourney } from './restrictions.js';
 import { HS1_STATIONS, ST_PANCRAS, type RouteDefinition } from './routes.js';
 import type { IntendedLeg, JourneyConstraints, PredictedLeg, TicketInfo } from './types.js';
 
@@ -35,6 +36,8 @@ export function assessValidity(
   /** Maps a CRS to its routeing point(s)/group, so "via" checks work at group
    *  level (e.g. any London terminal counts as "via London"). */
   resolveRouteingPoints?: (crs: string) => string[],
+  /** The ticket's time restriction (Off-Peak etc.), if resolved. */
+  restrictionDef?: RestrictionDefinition | null,
 ): ValidityResult {
   const anomalies: string[] = [];
   let reason: string | null = null;
@@ -123,9 +126,32 @@ export function assessValidity(
     }
   }
 
-  // Off-Peak time restrictions are not machine-checked yet.
-  if (ticket.hasTimeRestriction) {
-    anomalies.push('Off-peak time restriction not automatically verified (RST data not loaded)');
+  // Off-Peak / Super Off-Peak time restriction (RSPS5045 4.18): was the ticket
+  // valid on the service actually travelled?
+  const firstPredicted = predictedLegs[0];
+  const lastPredicted = predictedLegs[predictedLegs.length - 1];
+  if (restrictionDef && firstPredicted && lastPredicted) {
+    const journey: RestrictionJourney = {
+      direction: constraints.coupon === 'Return' ? 'R' : 'O',
+      date: ticket.startDate,
+      originDeparture: firstPredicted.actualDeparture ?? firstPredicted.scheduledDeparture,
+      destinationArrival: lastPredicted.actualArrival ?? lastPredicted.scheduledArrival,
+      originCrs: firstPredicted.originCrs,
+      destinationCrs: lastPredicted.destinationCrs,
+      tocs: new Set(predictedLegs.map((l) => l.toc).filter((t): t is string => !!t)),
+    };
+    const outcome = evaluateRestriction(restrictionDef, journey);
+    if (outcome === 'invalid') {
+      if (!reason) reason = 'RESTRICTION_NOT_VALID';
+      anomalies.push(
+        `Ticket restriction ${restrictionDef.code} (${restrictionDef.description}): the service travelled falls in a restricted time band, so the ticket was not valid on it`,
+      );
+    } else if (outcome === 'min-fare-only') {
+      anomalies.push(`Ticket restriction ${restrictionDef.code} (${restrictionDef.description}): valid but a minimum fare applies on this service`);
+    }
+  } else if (ticket.hasTimeRestriction && !restrictionDef) {
+    // Ticket is restricted but we couldn't resolve which restriction applies.
+    anomalies.push('Off-peak time restriction not automatically verified (restriction code not resolved)');
   }
 
   return { valid: reason === null, reason, anomalies };

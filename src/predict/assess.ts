@@ -14,6 +14,7 @@ import type { Journey, Leg, ServiceRun } from '../eligibility/journey.js';
 import { formatMinutes } from '../timetable/lookup.js';
 import { compensationPence } from './compensation.js';
 import { resolveBest } from './resolve.js';
+import type { RestrictionDefinition } from './restrictions.js';
 import type { RouteDefinition } from './routes.js';
 import { assessValidity } from './validity.js';
 import type {
@@ -45,6 +46,8 @@ export interface AssessCouponInput {
   readonly routeDef?: RouteDefinition | null;
   /** Maps a CRS to its routeing point(s)/group, for group-level "via" checks. */
   readonly resolveRouteingPoints?: (crs: string) => string[];
+  /** The ticket's time restriction (Off-Peak etc.), if resolved. */
+  readonly restrictionDef?: RestrictionDefinition | null;
   readonly threshold?: number;
   readonly interchangeMinutes?: number;
 }
@@ -154,6 +157,7 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
     bookedLegs,
     input.routeDef ?? null,
     input.resolveRouteingPoints,
+    input.restrictionDef ?? null,
   );
 
   // Confidence from how well the taps and train_info line up.

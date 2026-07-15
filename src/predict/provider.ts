@@ -75,6 +75,36 @@ export class BatchDataProvider {
     return used?.stationCrs ?? members[0] ?? null;
   }
 
+  /** NLC plus its fare group, for fare lookups. */
+  private faresNlcs(nlc: string): string[] {
+    const row = this.db.prepare('SELECT nlc, fare_group_nlc FROM locations WHERE nlc = ?').get(nlc) as
+      | { nlc: string; fare_group_nlc: string }
+      | undefined;
+    return row ? [...new Set([row.nlc, row.fare_group_nlc])] : [nlc];
+  }
+
+  /**
+   * The restriction code on the ticket's fare (flow + ticket type, matching the
+   * route code where given). Returns null when there is no restriction (e.g.
+   * Anytime tickets) or it can't be resolved unambiguously.
+   */
+  restrictionCodeFor(originNlc: string, destNlc: string, ticketCode: string, routeCode: string | null): string | null {
+    const oN = this.faresNlcs(originNlc);
+    const dN = this.faresNlcs(destNlc);
+    const rows = this.db
+      .prepare(
+        `SELECT DISTINCT fl.route_code AS route, f.restriction_code AS restriction
+         FROM flows fl JOIN fares f ON f.flow_id = fl.flow_id
+         WHERE fl.origin_nlc IN (${oN.map(() => '?').join(',')})
+           AND fl.destination_nlc IN (${dN.map(() => '?').join(',')})
+           AND f.ticket_code = ?`,
+      )
+      .all(...oN, ...dN, ticketCode) as { route: string | null; restriction: string | null }[];
+    const matched = routeCode ? rows.filter((r) => r.route === routeCode) : rows;
+    const codes = new Set((matched.length > 0 ? matched : rows).map((r) => r.restriction).filter((c): c is string => !!c));
+    return codes.size === 1 ? [...codes][0]! : null;
+  }
+
   ticketMeta(ftot: string): Pick<TicketInfo, 'kind' | 'fareType' | 'hasTimeRestriction'> {
     const row = this.db.prepare('SELECT description, type FROM ticket_types WHERE code = ?').get(ftot) as
       | { description: string; type: string | null }
@@ -114,6 +144,7 @@ export class BatchDataProvider {
         if (seen.has(rid)) continue;
         seen.add(rid);
         const details = await this.hsp.serviceDetails(rid);
+        const toc = details.serviceAttributesDetails.toc_code;
         const locations = details.serviceAttributesDetails.locations;
         const originIdx = locations.findIndex((l) => l.location === fromCrs);
         const destIdx = locations.findIndex((l) => l.location === toCrs);
@@ -139,6 +170,7 @@ export class BatchDataProvider {
           actualArrival: actArr,
           cancelled: actualArrival === null,
           callingPoints,
+          toc,
         });
       }
     }
