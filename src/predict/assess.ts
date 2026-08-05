@@ -10,6 +10,7 @@
  */
 
 import { assessEligibility } from '../eligibility/engine.js';
+import { bandForDelay } from '../eligibility/journey.js';
 import type { Journey, Leg, ServiceRun } from '../eligibility/journey.js';
 import { formatMinutes } from '../timetable/lookup.js';
 import { compensationPence } from './compensation.js';
@@ -75,6 +76,13 @@ function unresolvedVerdict(
     anomalies: constraints.anomalies,
     explanation: ['Could not reconstruct the journey from the available scans and services.'],
   };
+}
+
+/** The booked run within a leg's candidate runs, matched on scheduled times. */
+function findBookedRun(candidates: readonly ServiceRun[], leg: IntendedLeg): ServiceRun | undefined {
+  return candidates.find(
+    (r) => r.scheduledDeparture === leg.scheduledDeparture && r.scheduledArrival === leg.scheduledArrival,
+  );
 }
 
 /** Minimum scheduled arrival among first-leg candidates departing at/after `ready`. */
@@ -175,18 +183,74 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
     if (confidence === 'CONFIRMED') confidence = 'PROBABLE';
   }
 
-  const entitled = eligibility.eligible && validity.valid;
-  let reason: string | null = null;
-  if (!validity.valid) reason = validity.reason;
-  else if (!eligibility.eligible) reason = eligibility.delayMinutes === 0 ? 'NOT_DELAYED' : 'BELOW_THRESHOLD';
+  let delayMinutes = eligibility.delayMinutes;
+  let band = eligibility.band;
+  let eligible = eligibility.eligible;
 
-  const compensation = entitled ? compensationPence(eligibility.band, ticket.fareType, ticket.pricePence) : 0;
+  // Advance disruption: the booked itinerary service was cancelled, or ran late
+  // enough (or didn't run) that the customer couldn't travel it as booked, so
+  // they took the next service. That deviation is then legitimate - we excuse
+  // the "non-booked service" / valid-from flags and assess the delay of the
+  // journey actually taken against the BOOKED itinerary's intended arrival.
+  // (A booked service that ran on time but was skipped by choice - the T4 case -
+  // is not disrupted, so it stays INVALID_TICKET_FOR_SERVICE.)
+  let deviationExcused = false;
+  const disruptionNotes: string[] = [];
+  if (ticket.kind === 'advance' && bookedLegs && bookedLegs.length > 0 && predictedLegs.length > 0) {
+    const bookedFirst = bookedLegs[0]!;
+    const bookedLast = bookedLegs[bookedLegs.length - 1]!;
+    const first = predictedLegs[0]!;
+    const travelledBooked =
+      first.scheduledDeparture === bookedFirst.scheduledDeparture &&
+      first.scheduledArrival === bookedFirst.scheduledArrival;
+    const bookedRun = findBookedRun(itinerary.candidatesByLeg[0] ?? [], bookedFirst);
+    const bookedDisrupted =
+      !bookedRun ||
+      bookedRun.cancelled ||
+      bookedRun.actualArrival === null ||
+      bookedRun.actualArrival - bookedFirst.scheduledArrival >= threshold;
+
+    if (!travelledBooked && bookedDisrupted) {
+      // The customer's real arrival: prefer the exit tap at the destination,
+      // else the predicted final-leg arrival.
+      const exitAtDest = constraints.exit && constraints.exit.crs === toCrs ? constraints.exit.timeMinutes : null;
+      const actualArrival = exitAtDest ?? predictedLegs[predictedLegs.length - 1]!.actualArrival;
+      if (actualArrival !== null) {
+        delayMinutes = Math.max(0, actualArrival - bookedLast.scheduledArrival);
+        band = bandForDelay(delayMinutes)?.label ?? null;
+        eligible = delayMinutes >= threshold;
+        deviationExcused = true;
+        const why = !bookedRun || bookedRun.actualArrival === null || bookedRun.cancelled
+          ? 'cancelled'
+          : `${bookedRun.actualArrival - bookedFirst.scheduledArrival} min late`;
+        disruptionNotes.push(
+          `Advance booked ${formatMinutes(bookedFirst.scheduledDeparture)} service was disrupted (${why}); ` +
+            `assessed the journey actually taken: arrived ${formatMinutes(actualArrival)} vs booked itinerary arrival ` +
+            `${formatMinutes(bookedLast.scheduledArrival)} = ${delayMinutes} min late.`,
+        );
+      }
+    }
+  }
+
+  // The deviation and valid-from flags are excused when the booked itinerary was
+  // disrupted; any other validity failure (route, restriction) still blocks.
+  const validityBlocking =
+    !validity.valid &&
+    !(deviationExcused && (validity.reason === 'INVALID_TICKET_FOR_SERVICE' || validity.reason === 'OUTSIDE_VALIDITY'));
+
+  const entitled = eligible && !validityBlocking;
+  let reason: string | null = null;
+  if (validityBlocking) reason = validity.reason;
+  else if (!eligible) reason = delayMinutes === 0 ? 'NOT_DELAYED' : 'BELOW_THRESHOLD';
+
+  const compensation = entitled ? compensationPence(band, ticket.fareType, ticket.pricePence) : 0;
 
   const explanation = [
     `Predicted journey (${coupon}):`,
     ...predictedLegs.map((l) => `  ${describeLeg(l)}`),
     ...result.notes,
     ...eligibility.explanation,
+    ...disruptionNotes,
     ...validity.anomalies.map((a) => `Validity: ${a}`),
   ];
   if (directionAnomaly) {
@@ -199,8 +263,8 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
     reason,
     confidence,
     predictedLegs,
-    delayMinutes: Number.isFinite(eligibility.delayMinutes) ? eligibility.delayMinutes : null,
-    band: eligibility.band,
+    delayMinutes: Number.isFinite(delayMinutes) ? delayMinutes : null,
+    band,
     compensationPence: entitled ? compensation : null,
     anomalies: [...constraints.anomalies, ...validity.anomalies],
     explanation,

@@ -161,6 +161,35 @@ test('T4: Advance ticket ridden on a non-booked earlier train, not entitled', ()
   assert.equal(v.delayMinutes, 0);
 });
 
+// -------------------------------- Advance with a disrupted booked service
+test('Advance booked service disrupted: eligible against the itinerary arrival', () => {
+  // Booked 06:01 Strood->St Pancras (arr 06:34) ran 43 late; the customer took
+  // the 06:31 instead and arrived 07:13 (exit tap) = 39 late vs the itinerary.
+  const t = ticket({ utn: 'ADV', ftot: 'L13', kind: 'advance', fareType: 'single', pricePence: 2190, timeValidFrom: '06:01' });
+  const scans: RawScan[] = [
+    { SCANID: 1, coupon_type: 'Single', TIME: '2026-07-01T06:27:00+01:00', STATION: '5191', scan_mode: 'entry', action_text: 'Accepted' },
+    { SCANID: 2, coupon_type: 'Single', TIME: '2026-07-01T07:13:00+01:00', STATION: '1555', scan_mode: 'exit', action_text: 'Accepted' },
+  ];
+  const booked = [leg('SOO', 'STP', '06:01', '06:34')];
+  const itin: PlannedItinerary = {
+    legs: booked,
+    candidatesByLeg: [[
+      run('booked', '06:01', '06:34', '06:01', '07:17'), // booked, 43 late
+      run('alt', '06:31', '07:04', '06:31', '07:10'), // the service actually taken
+    ]],
+  };
+  const v = assessOne(t, scans, 'Single', 'SOO', 'STP', [itin], booked);
+  assert.equal(v.entitled, true);
+  assert.equal(v.reason, null);
+  assert.equal(v.delayMinutes, 39); // 07:13 exit vs 06:34 booked itinerary arrival
+  assert.equal(v.band, '30-59');
+  assert.equal(v.compensationPence, 1095); // 50% of £21.90
+});
+
+// A booked service that ran on time but was skipped by choice stays invalid: see
+// the T4 test above (INVALID_TICKET_FOR_SERVICE), which the disruption rule must
+// not weaken.
+
 // ---------------------------------------------------------------- T5 East Farleigh -> Cannon Street
 test('T5: single destination scan, multi-leg with a cancelled connection, 18 late eligible', () => {
   const t = ticket({ utn: 'T5', ftot: 'SDS', kind: 'walk-up', fareType: 'single', pricePence: 1835 });
