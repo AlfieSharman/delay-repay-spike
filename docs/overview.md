@@ -2,15 +2,17 @@
 
 A shareable summary of what the spike does today, what is still to build, and
 how we test it. For the detailed technical notes and gotchas, see
-[CLAUDE.md](../CLAUDE.md).
+[CLAUDE.md](../CLAUDE.md). Deeper design docs:
+[service-prediction.md](service-prediction.md) and
+[routeing-guide.md](routeing-guide.md).
 
 ## Purpose
 
 Detect Southeastern (SE) delays automatically from industry data and work out
 whether a customer's journey qualified for Delay Repay, and by how much. The
-longer-term goal is to check submitted claims against what actually happened,
-so we can spot claims for journeys the customer was not valid to travel on, or
-did not actually take.
+wider goal is to check submitted claims against what actually happened: predict
+which service a customer really travelled on from their scan data, confirm the
+ticket was valid on it, and produce an auditable per-claim verdict.
 
 This is exploratory code, not production. It is meant to prove the approach and
 be picked up by a developer, not to be complete.
@@ -21,141 +23,136 @@ be picked up by a developer, not to be complete.
 | --- | --- | --- |
 | 1. Ingest | Done | Downloads the national timetable, fares and routeing feeds from NRDP into `data/`. |
 | 2. Parse and load | Done | Parses the raw feeds, filters to Southeastern, loads into a local SQLite database (`data/spike.db`). |
-| 3. HSP client and eligibility engine | Done | Pulls actual vs scheduled times from the Historic Service Performance (HSP) API and decides whether a journey was delayed enough to claim. |
-| 4. Scan matching and ticket validity | Not started | Predict which service a customer travelled on from scan data, check the ticket was valid on it, and cross-reference against submitted claims. |
+| 3. HSP client and eligibility engine | Done | Pulls actual vs scheduled times from the Historic Service Performance (HSP) API and decides whether a journey was delayed enough to claim, in which band, at what compensation percentage. |
+| 4. Service prediction and batch verdicts | Done | From a ticket plus its scan data, predicts the service travelled, checks ticket validity, and produces a Delay Repay verdict per coupon. |
+| 5. National Routeing Guide | Partial | Route-code (via / not-via / HS1) validity is done and wired. The base permitted-route engine is built but deliberately paused (see below). |
 
 ### What it can do today
 
-Given an origin, destination, date and departure time, the spike looks up the
-intended journey in the local timetable, asks HSP what the trains actually did
-that day, and prints a Delay Repay verdict with a step-by-step explanation:
-eligible or not, delay in minutes, the SE band (15 / 30 / 60 / 120), and the
-compensation percentage.
+Two entry points, both producing a step-by-step explanation trail.
 
-The eligibility engine ([src/eligibility/engine.ts](../src/eligibility/engine.ts))
-handles:
+**Batch claim assessment (the headline).** `npm run batch -- <dir>` reads
+ticketing-export JSON files, and for each coupon:
 
-- Single and multi-leg journeys, including a missed connection where the
-  customer catches the next valid onward service.
-- Delay measured only at the final destination, against the intended arrival.
-- Advance tickets (must travel on booked services) versus flexible tickets
-  (best journey from the intended departure onward).
-- Cancellations (a cancelled service shows up as a missing actual arrival).
+1. Normalises and classifies the scans (gateline / on-train / admin /
+   rejected), and extracts the travel constraints (entry tap, exit tap,
+   on-train hints, anomalies).
+2. Predicts which service(s) the customer travelled on, working from the scans
+   against the timetable and HSP actuals, with a confidence tier
+   (CONFIRMED / PROBABLE / INFERRED / UNKNOWN).
+3. Checks validity: Advance booked-service enforcement, `TimeValidFrom`, scan
+   reason-code anomalies, route-code include/exclude rules, and Off-Peak /
+   Super Off-Peak time restrictions.
+4. Runs the eligibility engine for the delay verdict and computes the
+   compensation figure.
 
-Example runs against real HSP data:
+It prints one line per coupon (entitled, delay, band, compensation,
+confidence, reason/notes) and writes a full `results.json`. Add `--verbose`
+for the explanation trail per coupon.
 
-```
-# A service that arrived 36 minutes late -> ELIGIBLE, band 30-59
-npm run check -- TON CST 2026-07-02 0746 --advance
+**Single-journey check.** `npm run check -- <origin> <dest> <date> <dep>`
+simulates one customer journey (no scan data): looks up the intended journey
+in the timetable, asks HSP what actually ran, and prints the verdict. Flags:
+`--via <CRS>`, `--advance`, `--return`, `--threshold <min>`, `--no-cache`.
 
-# An on-time service -> NOT ELIGIBLE
-npm run check -- TON CST 2026-07-02 0624
-```
+The eligibility engine
+([src/eligibility/engine.ts](../src/eligibility/engine.ts)) handles single and
+multi-leg journeys, missed connections (catch the next valid onward service),
+delay measured only at the final destination, Advance versus flexible tickets,
+and cancellations (a cancelled service shows up as a missing actual arrival).
 
-### Known limitations today
+### How the pieces fit
 
-- **CLI supports one interchange only** (`--via <CRS>`). The engine itself
-  handles any number of legs, but `check.ts` only wires up a single change of
-  train.
-- **No ticket validity check.** The spike does not yet decide whether a ticket
-  was valid on a given service (for example an Off-Peak ticket on a Peak
-  train). The restriction data is downloaded but not parsed or loaded.
-- **No cash figure.** The engine returns a compensation percentage, not a
-  pounds-and-pence amount. Wiring in the loaded SE fares to produce an actual
-  value is a small, separate task.
+| Area | Code | Role |
+| --- | --- | --- |
+| Ingest / load | `src/ingest/`, `src/parse/`, `src/db/` | Download feeds, parse CIF + fares, load SE data into SQLite. |
+| Timetable lookup | `src/timetable/` | STP resolution, calendar checks, scheduled journeys between two stations. |
+| HSP client | `src/hsp/` | Typed, cached, rate-limited client for actual vs scheduled times. |
+| Eligibility | `src/eligibility/` | Pure delay verdict: eligible, delay, band, compensation percentage. |
+| Prediction | `src/predict/` | Scan parsing, service reconstruction, validity (route code, restrictions, reason codes), per-coupon assessment. |
+| Routeing | `src/routeing/` | Routeing-guide feed parser and permitted-routes lookup. |
+| Runners | `src/batch.ts`, `src/check.ts`, `src/query.ts` | The three CLIs. |
+
+Most of `src/predict/` and all of `src/eligibility/` are pure functions, so the
+logic is unit-tested with mocked data (no database or credentials needed). The
+impure data layer (`src/predict/provider.ts`, `src/batch.ts`) is what touches
+SQLite and HSP.
+
+### The paused piece: base permitted-route validation
+
+Route-code validity (does the fare's via / not-via / HS1 constraint permit this
+journey) is done and validated against Odyssey. The remaining routeing work,
+full permitted-route validation (does the journey follow a permitted map
+sequence at all), is built (`RouteingGuide.followsPermittedRoute`) but not
+wired as a gate: the node path we can build from HSP *stops* is too sparse to
+discriminate routes, so it would collapse to "a permitted route exists" and add
+false confidence. Making it useful needs the geographical points a service
+*passes* (from the CIF timetable, currently discarded) or is the clearest case
+for calling Odyssey rather than reproducing its engine. Full detail and resume
+steps are in [routeing-guide.md](routeing-guide.md).
+
+## Known limitations and open gaps
+
+- **Reason-code dictionary is conservative.** Rejected-scan reason codes are
+  surfaced with their meaning, but only codes we can confirm mean invalid
+  travel contribute to a rejection; the rest are review flags. The authoritative
+  code list from the ticketing team would let more be classified confidently.
+- **Season tickets / travelcards** are not handled (different compensation
+  model).
+- **Non-SE / multi-TOC journeys** come back unresolved: the timetable is
+  filtered to Southeastern. National journeys, and the "notify but redirect to
+  the responsible TOC" idea, are out of scope for the spike.
+- **Base permitted-route validation** is paused (see above).
 - **HSP has no data for today or yesterday** and covers roughly the last two
   years. Very recent journeys cannot be checked yet.
-- **Overnight journeys** (arrivals past midnight) are out of scope.
+- **Overnight journeys** (arrivals past midnight) are handled in prediction
+  (times normalised) but not in the single-journey `check` CLI.
+- **Delay threshold is a placeholder 15 minutes.** SE may apply a lower
+  threshold; the tool always reports the exact delay in minutes so the real
+  policy threshold can be applied on top.
 
-## What is next: phase 4
+## Roadmap
 
-The goal is to take recent Delay Repay claims and work out, from scan data,
-which service the customer actually travelled on, whether their ticket was
-valid on it, and whether that matches what they claimed for.
+Rough order of value, pending real claim data:
 
-Planned flow:
-
-1. **Predict the service.** For each ticket, take its scan events, shortlist
-   candidate services from the local timetable between the scanned locations
-   around the scan time, then confirm against HSP actuals. This is the reverse
-   of what `check.ts` does today. Output: a predicted service plus a confidence
-   score.
-2. **Check validity.** Parse the restriction dataset already downloaded
-   (`.RST`, `.TRR`, `.TPB`, `.TPN`), resolve the ticket's restriction code, and
-   decide whether the predicted service was permitted.
-3. **Cross-reference.** Compare the predicted service against the service the
-   customer claimed on, and output a per-ticket verdict: match, mismatch,
-   invalid ticket, or no HSP actuals yet.
-
-### Dependency: data export from a BE developer
-
-Phase 4 is fed by a file a backend developer exports (claims, tickets and scan
-events). The predicted-service accuracy depends heavily on the scan data, so we
-need to see the real shape before building. The two fields that matter most:
-
-- **Location coverage.** Scans at both origin and destination make prediction
-  reliable. Origin-only scans (common on SE, where many stations are ungated)
-  make it a best-guess with a confidence score, not a fact.
-- **Direction or type.** Tap-in versus tap-out versus on-train check.
-
-Agreed principle: where scan data is sparse, the spike **flags** mismatches for
-review rather than auto-rejecting claims.
-
-The export needs, per ticket: claim and ticket IDs, origin and destination CRS,
-route code, ticket type code, single or return, restriction code (if held),
-travel date, and the service the claim was submitted against. Per ticket, the
-scan events need: timestamp (with timezone), location (CRS or a mappable
-gateline ID), and direction or type. An anonymised sample of around five
-tickets is enough to start.
+1. **Reason-code dictionary completion.** Fill in the authoritative meaning and
+   action for every scan reason code once the ticketing team supplies the list.
+2. **Season tickets / travelcards.** Add their compensation model.
+3. **Non-SE / multi-TOC support and delay attribution.** Broaden beyond the SE
+   timetable filter; attribute delay to the responsible TOC.
+4. **Base permitted-route engine**, only if real claims show base-route
+   violations happen often enough to justify it, and then either by plumbing the
+   CIF geographical path or by calling Odyssey.
 
 ## How we test
 
-The spike is layered so most of the logic can be tested with no database and no
+The spike is layered so most logic can be tested with no database and no
 credentials.
 
 | What | Command | Needs |
 | --- | --- | --- |
-| Engine logic | `npm test` | Nothing. Uses mocked timetable and HSP data. |
+| Engine + prediction logic | `npm test` | Nothing. Uses mocked timetable and HSP data. |
 | Types compile | `npm run typecheck` | Nothing. |
-| Loaded data sanity | `npm run query -- stats` / `services <CRS> <date>` | `data/spike.db`. |
-| End-to-end verdict | `npm run check -- <o> <d> <date> <dep>` | `data/spike.db` and NRDP credentials in `.env`. |
+| Loaded data sanity | `npm run query -- stats` / `services <CRS> <date>` / `fares <o> <d>` | `data/spike.db`. |
+| Routeing points / permitted routes | `npm run routes -- <o> <d>` | The routeing feed in `data/`. |
+| Single journey verdict | `npm run check -- <o> <d> <date> <dep>` | `data/spike.db` and NRDP credentials in `.env`. |
+| Batch claim assessment | `npm run batch -- <dir>` | `data/spike.db`, NRDP credentials, and ticketing-export JSON files. |
 
 Notes:
 
-- **`npm test`** is the fast feedback loop. The engine is a pure function:
-  intended journey plus actual service runs in, verdict out. Tests cover
-  on-time, delayed, the multi-leg missed-connection case (both the just-under
-  and just-over threshold outcomes), a flexible-ticket alternative, and a
-  cancellation. Add cases by constructing service runs by hand; no network
-  needed.
+- **`npm test`** is the fast feedback loop. The eligibility engine and the
+  prediction pipeline are pure functions, tested end to end against the real
+  reference tickets. Add cases by constructing scans / service runs by hand; no
+  network needed.
+- **New validity logic is validated against the Odyssey journey-planner
+  oracle** (which fares and route codes it sells per journey), not just against
+  a manual reading of the spec.
 - **HSP responses are cached** to `data/hsp-cache/`, so re-running the same
-  `check` is free and offline after the first call. Use `--no-cache` to force a
-  fresh query. HSP is a shared industry service, so requests are serialised and
-  rate-limited.
-- Pick a **weekday at least two days in the past** for `check`, since HSP has no
-  recent data.
-
-### Testing plan for phase 4
-
-Same layered approach:
-
-1. Build the scan parser and predictor as **pure functions** (scan events in,
-   candidate services out), unit-tested with small fixtures. No database or HSP
-   needed for the logic tests.
-2. Add fixtures shaped like the BE export (a handful of anonymised tickets) so
-   the parser is tested against the real format.
-3. Test validity against known cases: an Off-Peak ticket on a Peak service
-   should be rejected with a clear reason; the same ticket on an Off-Peak
-   service should pass.
-4. End-to-end: run the real exported sample through predict, validity and
-   cross-reference, and confirm each ticket produces an auditable line
-   (predicted service, confidence, valid or invalid with reason, and
-   match or mismatch against the claim).
-
-Success for phase 4: for the sample tickets, the spike outputs a predicted
-service with confidence, a validity verdict with a reason, and a match or
-mismatch against the submitted claim, all auditable line by line, in the same
-style as the current engine's explanation trail.
+  `check` or `batch` is free and offline after the first call. Use `--no-cache`
+  to force a fresh query. HSP is a shared industry service, so requests are
+  serialised and rate-limited.
+- Pick a **weekday at least two days in the past**, since HSP has no recent
+  data.
 
 ## Running it from scratch
 
@@ -164,9 +161,12 @@ npm install
 cp .env.example .env        # then fill in NRDP_USERNAME and NRDP_PASSWORD
 npm run download            # downloads the feeds (the timetable is large)
 npm run load                # builds data/spike.db, filtered to Southeastern
-npm test                    # confirm the engine passes
+npm test                    # confirm the engine and prediction pass
 npm run check -- TON CST 2026-07-02 0746 --advance
+npm run batch -- data/dr-spike-1
 ```
 
 `data/` and `.env` are git-ignored. The database and feeds are regenerable with
 `npm run download` then `npm run load`.
+</content>
+</invoke>

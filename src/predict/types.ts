@@ -66,6 +66,8 @@ export interface JourneyConstraints {
   readonly entry?: { readonly crs: string; readonly timeMinutes: number };
   readonly exit?: { readonly crs: string; readonly timeMinutes: number };
   readonly onTrain: readonly TrainInfo[];
+  /** Raw reason codes from rejected scans (looked up in reason-codes.ts). */
+  readonly reasonCodes: readonly string[];
   readonly anomalies: readonly string[];
 }
 

@@ -192,8 +192,13 @@ This is common on SE and must not be treated as an error:
 ## Step 7: Anomaly flags (emit alongside the prediction, never silently drop)
 
 - Rejected scan with `LOCDIR` (wrong location/direction, T2) or `INCTIM`
-  (invalid time, T4). Obtain the full reason-code list from the scanning
-  system and map each to an interpretation.
+  (invalid time, T4). Reason codes are mapped in `src/predict/reason-codes.ts`:
+  each code has a meaning and an action of `invalid-travel` (drives a
+  rejection) or `review` (flag only). It is conservative on purpose: only
+  codes confirmed to mean invalid travel reject, so only `INCTIM` does today.
+  Unconfirmed and unknown codes are `review`. Fill in the authoritative meaning
+  and action per code once the ticketing team supplies the full list, flipping
+  `confirmed`/`action` in that file.
 - Travel before `TimeValidFrom` or outside the validity dates.
 - Advance ticket evidence inconsistent with the booked service (T4).
 - `train_info` inconsistent with journey direction (T2).

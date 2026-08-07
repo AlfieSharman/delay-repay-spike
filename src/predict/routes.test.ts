@@ -62,7 +62,7 @@ test('NOT VIA LONDON is invalid via any London terminal, valid when avoided', ()
       legs: [{ originCrs: calling[0]!, destinationCrs: calling[calling.length - 1]!, scheduledDeparture: at('06:48'), scheduledArrival: at('09:39') }],
       candidatesByLeg: [runs],
     };
-    const constraints: JourneyConstraints = { coupon: 'Single', onTrain: [], anomalies: [] };
+    const constraints: JourneyConstraints = { coupon: 'Single', onTrain: [], reasonCodes: [], anomalies: [] };
     return assessCoupon({
       ticket: { ...ticket('walk-up'), routeCode: '00700' }, coupon: 'Single',
       fromCrs: calling[0]!, toCrs: calling[calling.length - 1]!, constraints,
@@ -84,7 +84,7 @@ test('HS1-excluded route on a High Speed journey is not permitted', () => {
     { id: 's', scheduledDeparture: at('08:25'), scheduledArrival: at('09:00'), actualDeparture: at('08:25'), actualArrival: at('09:20'), cancelled: false },
   ];
   const itin: PlannedItinerary = { legs: [{ originCrs: 'EBD', destinationCrs: 'STP', scheduledDeparture: at('08:25'), scheduledArrival: at('09:00') }], candidatesByLeg: [runs] };
-  const constraints: JourneyConstraints = { coupon: 'Single', entry: { crs: 'EBD', timeMinutes: at('08:20') }, exit: { crs: 'STP', timeMinutes: at('09:22') }, onTrain: [], anomalies: [] };
+  const constraints: JourneyConstraints = { coupon: 'Single', entry: { crs: 'EBD', timeMinutes: at('08:20') }, exit: { crs: 'STP', timeMinutes: at('09:22') }, onTrain: [], reasonCodes: [], anomalies: [] };
   const v = assessCoupon({
     ticket: ticket('walk-up'), coupon: 'Single', fromCrs: 'EBD', toCrs: 'STP', constraints,
     itineraries: [itin], bookedLegs: null,

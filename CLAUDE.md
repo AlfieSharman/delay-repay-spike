@@ -168,10 +168,15 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
 - **`STATION` in a scan is an NLC; a `clip` scan is on-train, not a gate.** Its
   `STATION` is often just the booked end, not where the scan physically
   happened, so on-train scans must not be treated as gateline entry/exit.
-- **Rejected scan reason codes are signals**: `INCTIM` (invalid time) implies
-  invalid travel; `LOCDIR` (wrong direction) is a review flag, not an
-  auto-reject. `train_info` can be stale (a unit still advertising its previous
-  working), so its direction is checked, never trusted blindly.
+- **Rejected scan reason codes are signals**, mapped in
+  `src/predict/reason-codes.ts` (meaning + `invalid-travel`/`review` action).
+  It is deliberately conservative: only codes *confirmed* to mean invalid
+  travel drive a rejection, so today only `INCTIM` (invalid time) does; `LOCDIR`
+  (wrong direction) and every unconfirmed or unknown code are `review` flags,
+  surfaced but never auto-rejecting. Flip `confirmed`/`action` there as the
+  ticketing team's authoritative code list arrives. `train_info` can be stale
+  (a unit still advertising its previous working), so its direction is checked,
+  never trusted blindly.
 - **Past-midnight arrivals must be normalised** (+1440 when arrival < departure)
   before any min-arrival comparison, or a late-evening return that arrives after
   midnight looks *earlier* than an on-time one and corrupts the delay.

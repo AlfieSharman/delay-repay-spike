@@ -8,6 +8,7 @@
  */
 
 import { parseHHMM } from '../timetable/lookup.js';
+import { isInvalidTravelCode } from './reason-codes.js';
 import { evaluateRestriction, type RestrictionDefinition, type RestrictionJourney } from './restrictions.js';
 import { HS1_STATIONS, ST_PANCRAS, type RouteDefinition } from './routes.js';
 import type { IntendedLeg, JourneyConstraints, PredictedLeg, TicketInfo } from './types.js';
@@ -18,9 +19,6 @@ export interface ValidityResult {
   readonly reason: string | null;
   readonly anomalies: readonly string[];
 }
-
-/** Reason codes from the scanning system that indicate invalid travel. */
-const INVALID_TRAVEL_REASON_CODES = new Set(['INCTIM']);
 
 /** The CRS codes a journey called at, across all legs. */
 function journeyStations(legs: readonly PredictedLeg[]): Set<string> {
@@ -69,9 +67,11 @@ export function assessValidity(
     }
   }
 
-  // Reason-code anomalies from the scans.
-  for (const code of scanReasonCodes(constraints)) {
-    if (INVALID_TRAVEL_REASON_CODES.has(code) && !reason) reason = 'INVALID_TICKET_FOR_SERVICE';
+  // Reason-code anomalies from the scans. Only codes confirmed to mean invalid
+  // travel (see reason-codes.ts) drive a rejection; the rest stay review flags,
+  // already surfaced as anomalies by extractConstraints.
+  for (const code of constraints.reasonCodes) {
+    if (isInvalidTravelCode(code) && !reason) reason = 'INVALID_TICKET_FOR_SERVICE';
   }
 
   // Route code (RSPS5047 9.1): the journey must not pass through the route's
@@ -155,15 +155,6 @@ export function assessValidity(
   }
 
   return { valid: reason === null, reason, anomalies };
-}
-
-function scanReasonCodes(constraints: JourneyConstraints): string[] {
-  const codes: string[] = [];
-  for (const anomaly of constraints.anomalies) {
-    const match = /\(([A-Z]+)\)/.exec(anomaly);
-    if (match) codes.push(match[1]!);
-  }
-  return codes;
 }
 
 function fmt(m: number): string {

@@ -4,6 +4,7 @@
  * NLC->CRS resolver in, typed events and constraints out.
  */
 
+import { lookupReasonCode } from './reason-codes.js';
 import type {
   CouponType,
   JourneyConstraints,
@@ -137,6 +138,7 @@ export function extractConstraints(coupon: CouponType, scans: readonly ScanEvent
   let entry: { crs: string; timeMinutes: number } | undefined;
   let exit: { crs: string; timeMinutes: number } | undefined;
   const onTrain: TrainInfo[] = [];
+  const reasonCodes: string[] = [];
   const anomalies: string[] = [];
 
   for (const scan of scans) {
@@ -147,14 +149,18 @@ export function extractConstraints(coupon: CouponType, scans: readonly ScanEvent
     if (scan.kind === 'on-train' && scan.trainInfo) onTrain.push(scan.trainInfo);
     if (scan.kind === 'rejected') {
       const where = scan.stationCrs ?? scan.stationNlc ?? 'unknown location';
-      const reason = scan.reasonCode ? ` (${scan.reasonCode})` : '';
+      let reason = '';
+      if (scan.reasonCode) {
+        reasonCodes.push(scan.reasonCode);
+        reason = ` ${scan.reasonCode} (${lookupReasonCode(scan.reasonCode).meaning})`;
+      }
       anomalies.push(`Rejected scan${reason} at ${where} ${formatMin(scan.timeMinutes)}`);
       // A rejected scan may still name the train it was presented on.
       if (scan.trainInfo) onTrain.push(scan.trainInfo);
     }
   }
 
-  return { coupon, entry, exit, onTrain, anomalies };
+  return { coupon, entry, exit, onTrain, reasonCodes, anomalies };
 }
 
 function formatMin(m: number): string {
