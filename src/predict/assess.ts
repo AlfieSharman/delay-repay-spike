@@ -82,11 +82,12 @@ function unresolvedVerdict(
 }
 
 /**
- * Walk-up fallback verdict when the journey couldn't be reconstructed from the
- * ticket origin but the customer's itinerary is known. Delay is measured
- * against the itinerary's intended arrival, using the exit tap as the real
- * arrival (or the itinerary service's own actual arrival when there is no exit
- * tap - "assume they travelled the itinerary"). Heuristic, so INFERRED.
+ * Walk-up fallback verdict when the journey can't be established from the ticket
+ * origin but the customer's itinerary is known. Delay is measured against the
+ * itinerary's intended arrival. The actual arrival is the itinerary service's
+ * own arrival when it ran ("assume they travelled the itinerary", and it is the
+ * train arrival, consistent with the engine); otherwise the exit tap. Heuristic,
+ * so INFERRED.
  */
 function itineraryFallbackVerdict(
   coupon: CouponType,
@@ -103,7 +104,8 @@ function itineraryFallbackVerdict(
 
   const exitAtDest = constraints.exit && constraints.exit.crs === toCrs ? constraints.exit.timeMinutes : null;
   const itinService = findBookedRun(itinerary.candidatesByLeg[legs.length - 1] ?? [], lastLeg);
-  const actualArrival = exitAtDest ?? itinService?.actualArrival ?? null;
+  const ranItinService = !!itinService && !itinService.cancelled && itinService.actualArrival !== null;
+  const actualArrival = ranItinService ? itinService!.actualArrival! : exitAtDest;
   if (actualArrival === null) return null;
 
   const delayMinutes = Math.max(0, actualArrival - itineraryArrival);
@@ -122,7 +124,7 @@ function itineraryFallbackVerdict(
     callingPoints: [l.originCrs, l.destinationCrs],
   }));
 
-  const source = exitAtDest !== null ? 'exit tap' : 'assumed travel on the itinerary service';
+  const source = ranItinService ? 'itinerary service actual arrival' : 'exit tap';
   return {
     coupon,
     entitled: eligible,
@@ -168,17 +170,20 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
   const interchange = input.interchangeMinutes ?? DEFAULT_INTERCHANGE;
 
   const resolved = resolveBest(input.itineraries, constraints, interchange);
+
+  // Walk-up itinerary baseline: when the customer's itinerary is known but the
+  // scans don't establish a clean journey from the ticket origin - either
+  // resolution failed, or there is no entry tap at the origin (exit-only, or
+  // boarded downstream) - assess the delay against the itinerary's intended
+  // arrival rather than a best-achievable service picked to fit the exit tap.
+  // Fully-scanned walk-ups (entry tap at the origin) keep the best-achievable
+  // rule and never take this path.
+  const entryAtOrigin = !!(constraints.entry && constraints.entry.crs === fromCrs);
+  if (ticket.kind !== 'advance' && input.itineraryPinned && (!resolved || !entryAtOrigin)) {
+    const fallback = itineraryFallbackVerdict(coupon, ticket, constraints, input.itineraries[0], toCrs, threshold);
+    if (fallback) return fallback;
+  }
   if (!resolved) {
-    // Walk-up fallback: when the customer's itinerary is known but we couldn't
-    // reconstruct a clean journey from the ticket origin (e.g. they boarded
-    // downstream, or a leg has no scans), assess the delay against the
-    // itinerary's intended arrival, using the exit tap - or, absent an exit
-    // tap, the itinerary service's own actual arrival ("assume they travelled
-    // it"). Fully-scanned walk-ups still resolve normally and never reach here.
-    if (ticket.kind !== 'advance' && input.itineraryPinned) {
-      const fallback = itineraryFallbackVerdict(coupon, ticket, constraints, input.itineraries[0], toCrs, threshold);
-      if (fallback) return fallback;
-    }
     const reason = constraints.entry || constraints.exit ? 'SERVICE_UNRESOLVED' : 'NO_TRAVEL_EVIDENCE';
     return unresolvedVerdict(coupon, constraints, reason);
   }

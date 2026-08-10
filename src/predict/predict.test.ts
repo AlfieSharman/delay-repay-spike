@@ -221,6 +221,59 @@ test('Walk-up: boarded downstream of the ticket origin falls back to the itinera
   assert.equal(v.compensationPence, 368); // 25% of £14.70
 });
 
+// Exit-tap-only: resolution "succeeds" on an on-time service that fits the exit
+// tap, but with no entry at the origin the itinerary baseline must win, using
+// the (late) itinerary service's own arrival. (Mirrors the Swanley->Blackfriars
+// claim: intended 08:35, itinerary service P88272 arrived 08:53 = 18 late.)
+test('Walk-up exit-only uses the itinerary baseline, not the exit-fit service', () => {
+  const t = ticket({ utn: 'WUF3', ftot: 'SDS', kind: 'walk-up', fareType: 'single', pricePence: 960 });
+  const itin: PlannedItinerary = {
+    legs: [leg('SAY', 'BFR', '08:01', '08:35')],
+    candidatesByLeg: [[
+      run('itin', '08:01', '08:35', '08:08', '08:53'), // the itinerary service, 18 late
+      run('later', '08:11', '08:59', '08:11', '08:57'), // on time, best fit to the exit tap
+    ]],
+  };
+  const constraints: JourneyConstraints = {
+    coupon: 'Single',
+    exit: { crs: 'BFR', timeMinutes: at('08:57') }, // no entry tap at the origin
+    onTrain: [], reasonCodes: [], anomalies: [],
+  };
+  const v = assessCoupon({
+    ticket: t, coupon: 'Single', fromCrs: 'SAY', toCrs: 'BFR', constraints,
+    itineraries: [itin], bookedLegs: null, itineraryPinned: true,
+  });
+  assert.equal(v.entitled, true);
+  assert.equal(v.delayMinutes, 18); // itinerary service 08:53 vs itinerary arrival 08:35
+  assert.equal(v.band, '15-29');
+  assert.equal(v.confidence, 'INFERRED');
+});
+
+// A fully-scanned walk-up (entry tap at the origin) keeps the best-achievable
+// rule and must NOT use the itinerary baseline even when it is pinned.
+test('Walk-up with entry at the origin keeps best-achievable, ignoring the itinerary baseline', () => {
+  const t = ticket({ utn: 'WUF4', ftot: 'SDS', kind: 'walk-up', fareType: 'single', pricePence: 960 });
+  const itin: PlannedItinerary = {
+    legs: [leg('SAY', 'BFR', '08:01', '08:35')],
+    candidatesByLeg: [[run('caught', '08:11', '08:59', '08:12', '08:57')]],
+  };
+  const constraints: JourneyConstraints = {
+    coupon: 'Single',
+    entry: { crs: 'SAY', timeMinutes: at('08:05') }, // entry AT the origin
+    exit: { crs: 'BFR', timeMinutes: at('08:59') },
+    onTrain: [], reasonCodes: [], anomalies: [],
+  };
+  const v = assessCoupon({
+    ticket: t, coupon: 'Single', fromCrs: 'SAY', toCrs: 'BFR', constraints,
+    itineraries: [itin], bookedLegs: null, itineraryPinned: true,
+  });
+  // Best-achievable from the 08:05 entry: the 08:11 service arrived 08:57 vs its
+  // own 08:59 schedule -> on time, not eligible. The 08:35 itinerary arrival is
+  // deliberately NOT used here.
+  assert.equal(v.entitled, false);
+  assert.equal(v.delayMinutes, 0);
+});
+
 // Without itineraryPinned the same unresolvable journey stays UNKNOWN (the
 // fallback must not fire for inferred candidates or fully-scanned walk-ups).
 test('Walk-up fallback does not fire without a pinned itinerary', () => {
