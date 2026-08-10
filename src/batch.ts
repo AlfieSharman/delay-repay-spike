@@ -139,7 +139,7 @@ async function assessTicket(
       }
 
       verdicts.push(
-        assessCoupon({ ticket, coupon, fromCrs, toCrs, constraints, itineraries, bookedLegs, routeDef, resolveRouteingPoints, restrictionDef }),
+        assessCoupon({ ticket, coupon, fromCrs, toCrs, constraints, itineraries, bookedLegs, routeDef, resolveRouteingPoints, restrictionDef, itineraryPinned: plannedLegs != null }),
       );
     } catch (err) {
       verdicts.push(unresolved(coupon, 'NO_HSP_DATA_YET', `HSP lookup failed: ${(err as Error).message}`));

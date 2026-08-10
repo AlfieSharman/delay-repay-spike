@@ -10,7 +10,7 @@ import { test } from 'node:test';
 import type { ServiceRun } from '../eligibility/journey.js';
 import { assessCoupon } from './assess.js';
 import { extractConstraints, groupByCoupon, normaliseScans, type RawScan } from './scans.js';
-import type { CouponType, IntendedLeg, PlannedItinerary, TicketInfo } from './types.js';
+import type { CouponType, IntendedLeg, JourneyConstraints, PlannedItinerary, TicketInfo } from './types.js';
 
 function at(hhmm: string): number {
   const [h, m] = hhmm.split(':').map(Number);
@@ -189,6 +189,59 @@ test('Advance booked service disrupted: eligible against the itinerary arrival',
 // A booked service that ran on time but was skipped by choice stays invalid: see
 // the T4 test above (INVALID_TICKET_FOR_SERVICE), which the disruption rule must
 // not weaken.
+
+// -------------------------------- Walk-up itinerary fallback (boarded downstream of origin)
+test('Walk-up: boarded downstream of the ticket origin falls back to the itinerary baseline', () => {
+  // Ticket Gravesend->Stratford Intl, itinerary 06:11->06:26. The booked service
+  // was cancelled and the customer boarded at Ebbsfleet (downstream), exiting
+  // Stratford at 06:45. No GRV->SFA actual fits the exit, so normal resolution
+  // fails; the fallback measures 06:45 vs the 06:26 itinerary arrival = 19 late.
+  const t = ticket({ utn: 'WUF', ftot: 'SDS', kind: 'walk-up', fareType: 'single', pricePence: 1470 });
+  const itin: PlannedItinerary = {
+    legs: [leg('GRV', 'SFA', '06:11', '06:26')],
+    candidatesByLeg: [[
+      run('booked', '06:11', '06:26', null, null), // cancelled
+      run('next', '06:44', '06:59', '06:44', '06:59'), // arrives after the exit tap
+    ]],
+  };
+  const constraints: JourneyConstraints = {
+    coupon: 'Single',
+    entry: { crs: 'EBD', timeMinutes: at('06:27') }, // downstream of GRV
+    exit: { crs: 'SFA', timeMinutes: at('06:45') },
+    onTrain: [], reasonCodes: [], anomalies: [],
+  };
+  const v = assessCoupon({
+    ticket: t, coupon: 'Single', fromCrs: 'GRV', toCrs: 'SFA', constraints,
+    itineraries: [itin], bookedLegs: null, itineraryPinned: true,
+  });
+  assert.equal(v.entitled, true);
+  assert.equal(v.delayMinutes, 19);
+  assert.equal(v.band, '15-29');
+  assert.equal(v.confidence, 'INFERRED');
+  assert.equal(v.compensationPence, 368); // 25% of £14.70
+});
+
+// Without itineraryPinned the same unresolvable journey stays UNKNOWN (the
+// fallback must not fire for inferred candidates or fully-scanned walk-ups).
+test('Walk-up fallback does not fire without a pinned itinerary', () => {
+  const t = ticket({ utn: 'WUF2', ftot: 'SDS', kind: 'walk-up', fareType: 'single', pricePence: 1470 });
+  const itin: PlannedItinerary = {
+    legs: [leg('GRV', 'SFA', '06:11', '06:26')],
+    candidatesByLeg: [[run('next', '06:44', '06:59', '06:44', '06:59')]],
+  };
+  const constraints: JourneyConstraints = {
+    coupon: 'Single',
+    entry: { crs: 'EBD', timeMinutes: at('06:27') },
+    exit: { crs: 'SFA', timeMinutes: at('06:45') },
+    onTrain: [], reasonCodes: [], anomalies: [],
+  };
+  const v = assessCoupon({
+    ticket: t, coupon: 'Single', fromCrs: 'GRV', toCrs: 'SFA', constraints,
+    itineraries: [itin], bookedLegs: null, // itineraryPinned omitted
+  });
+  assert.equal(v.entitled, false);
+  assert.equal(v.reason, 'SERVICE_UNRESOLVED');
+});
 
 // ---------------------------------------------------------------- T5 East Farleigh -> Cannon Street
 test('T5: single destination scan, multi-leg with a cancelled connection, 18 late eligible', () => {

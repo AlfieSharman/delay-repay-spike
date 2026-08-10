@@ -49,6 +49,9 @@ export interface AssessCouponInput {
   readonly resolveRouteingPoints?: (crs: string) => string[];
   /** The ticket's time restriction (Off-Peak etc.), if resolved. */
   readonly restrictionDef?: RestrictionDefinition | null;
+  /** True when itineraries[0] is the customer's actual (pinned) itinerary, not
+   *  an inferred candidate. Enables the walk-up itinerary-baseline fallback. */
+  readonly itineraryPinned?: boolean;
   readonly threshold?: number;
   readonly interchangeMinutes?: number;
 }
@@ -75,6 +78,66 @@ function unresolvedVerdict(
     compensationPence: null,
     anomalies: constraints.anomalies,
     explanation: ['Could not reconstruct the journey from the available scans and services.'],
+  };
+}
+
+/**
+ * Walk-up fallback verdict when the journey couldn't be reconstructed from the
+ * ticket origin but the customer's itinerary is known. Delay is measured
+ * against the itinerary's intended arrival, using the exit tap as the real
+ * arrival (or the itinerary service's own actual arrival when there is no exit
+ * tap - "assume they travelled the itinerary"). Heuristic, so INFERRED.
+ */
+function itineraryFallbackVerdict(
+  coupon: CouponType,
+  ticket: TicketInfo,
+  constraints: JourneyConstraints,
+  itinerary: PlannedItinerary | undefined,
+  toCrs: string,
+  threshold: number,
+): CouponVerdict | null {
+  if (!itinerary || itinerary.legs.length === 0) return null;
+  const legs = itinerary.legs;
+  const lastLeg = legs[legs.length - 1]!;
+  const itineraryArrival = lastLeg.scheduledArrival;
+
+  const exitAtDest = constraints.exit && constraints.exit.crs === toCrs ? constraints.exit.timeMinutes : null;
+  const itinService = findBookedRun(itinerary.candidatesByLeg[legs.length - 1] ?? [], lastLeg);
+  const actualArrival = exitAtDest ?? itinService?.actualArrival ?? null;
+  if (actualArrival === null) return null;
+
+  const delayMinutes = Math.max(0, actualArrival - itineraryArrival);
+  const band = bandForDelay(delayMinutes)?.label ?? null;
+  const eligible = delayMinutes >= threshold;
+  const compensation = eligible ? compensationPence(band, ticket.fareType, ticket.pricePence) : 0;
+
+  const predictedLegs: PredictedLeg[] = legs.map((l, i) => ({
+    originCrs: l.originCrs,
+    destinationCrs: l.destinationCrs,
+    scheduledDeparture: l.scheduledDeparture,
+    scheduledArrival: l.scheduledArrival,
+    actualDeparture: null,
+    actualArrival: i === legs.length - 1 ? actualArrival : null,
+    cancelled: false,
+    callingPoints: [l.originCrs, l.destinationCrs],
+  }));
+
+  const source = exitAtDest !== null ? 'exit tap' : 'assumed travel on the itinerary service';
+  return {
+    coupon,
+    entitled: eligible,
+    reason: eligible ? null : delayMinutes === 0 ? 'NOT_DELAYED' : 'BELOW_THRESHOLD',
+    confidence: 'INFERRED',
+    predictedLegs,
+    delayMinutes: Number.isFinite(delayMinutes) ? delayMinutes : null,
+    band,
+    compensationPence: eligible ? compensation : null,
+    anomalies: [...constraints.anomalies],
+    explanation: [
+      `Could not reconstruct a clean journey from ${legs[0]!.originCrs} (scans don't establish travel from the ticket origin).`,
+      `Fell back to the itinerary: intended arrival ${formatMinutes(itineraryArrival)}, actual arrival ` +
+        `${formatMinutes(actualArrival)} (${source}) = ${delayMinutes} min late (threshold ${threshold}).`,
+    ],
   };
 }
 
@@ -106,6 +169,16 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
 
   const resolved = resolveBest(input.itineraries, constraints, interchange);
   if (!resolved) {
+    // Walk-up fallback: when the customer's itinerary is known but we couldn't
+    // reconstruct a clean journey from the ticket origin (e.g. they boarded
+    // downstream, or a leg has no scans), assess the delay against the
+    // itinerary's intended arrival, using the exit tap - or, absent an exit
+    // tap, the itinerary service's own actual arrival ("assume they travelled
+    // it"). Fully-scanned walk-ups still resolve normally and never reach here.
+    if (ticket.kind !== 'advance' && input.itineraryPinned) {
+      const fallback = itineraryFallbackVerdict(coupon, ticket, constraints, input.itineraries[0], toCrs, threshold);
+      if (fallback) return fallback;
+    }
     const reason = constraints.entry || constraints.exit ? 'SERVICE_UNRESOLVED' : 'NO_TRAVEL_EVIDENCE';
     return unresolvedVerdict(coupon, constraints, reason);
   }
