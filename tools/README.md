@@ -26,6 +26,26 @@ writes one `data/<dir>/<UTN>.json` per ticket. It:
 
 Then run: `npm run batch -- data/<dir>`.
 
+## `xlsx-inject-itinerary.py`
+
+Same idea as the merge script above, but for the newer export shape where the
+**ticket JSON is embedded in the spreadsheet itself** (a "Scan Data" column)
+rather than a separate scan-text file. Reads each row's JSON, derives the
+Outward/Single itinerary from the "Outward Ticket Itinerary" + "Service UID"
+columns, and writes one batch-ready `data/<dir>/tickets.json` with
+`Ticket.Itinerary` populated (which `src/predict/itinerary.ts` parses).
+
+Endpoint CRS come from the ticket Origin/Destination NLC; a London-terminals
+group is resolved to the terminal the scans used (a gate scan at a member,
+else the `train_info` route origin). Prints per ticket what it injected or why
+it couldn't. Known limits: only the outward/single itinerary is in the sheet
+(return coupons get none), and a two-service (cross-London change) UID is
+emitted as a single origin->destination leg with the overall times - enough for
+the intended-arrival baseline, not full multi-leg modelling.
+
+Usage: `python3 tools/xlsx-inject-itinerary.py <xlsx> [spike.db] [out_dir]`,
+then `npm run batch -- <out_dir>`.
+
 ## `score-spreadsheet.py`
 
 Reads `data/<dir>/results.json` and fills the spreadsheet's output columns
