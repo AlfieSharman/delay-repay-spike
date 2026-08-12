@@ -60,7 +60,16 @@ export class BatchDataProvider {
   /**
    * Resolves a ticket origin or destination NLC to a CRS. A fare-group NLC
    * (e.g. 1072 "LONDON TERMINALS") has no CRS of its own, so we expand it to
-   * its member stations and pick the one the scans actually used.
+   * its member stations and pick the terminal the scans point to:
+   *   1. a gate scan physically at a member station;
+   *   2. else a member named as the origin/destination of a clipped service
+   *      (the terminal a service runs from/to - via train_info); this is what
+   *      recovers ungated-London Kent journeys, where no London gate scan
+   *      exists but a clip names e.g. LBG-DVP or CST-TON.
+   *   3. else the first member as a last resort (arbitrary - the group has no
+   *      CRS and nothing pins it; e.g. LONDON TERMINALS defaults to Euston,
+   *      which serves no SE Kent flow, so this usually just falls through to
+   *      SERVICE_UNRESOLVED).
    */
   resolveCrs(nlc: string, scans: readonly ScanEvent[]): string | null {
     const direct = this.nlcToCrs(nlc);
@@ -71,8 +80,14 @@ export class BatchDataProvider {
       }[]
     ).map((r) => r.crs);
     const memberSet = new Set(members);
-    const used = scans.find((s) => s.stationCrs && memberSet.has(s.stationCrs));
-    return used?.stationCrs ?? members[0] ?? null;
+    const gateScanned = scans.find((s) => s.stationCrs && memberSet.has(s.stationCrs));
+    if (gateScanned?.stationCrs) return gateScanned.stationCrs;
+    for (const s of scans) {
+      const ti = s.trainInfo;
+      if (ti?.routeFromCrs && memberSet.has(ti.routeFromCrs)) return ti.routeFromCrs;
+      if (ti?.routeToCrs && memberSet.has(ti.routeToCrs)) return ti.routeToCrs;
+    }
+    return members[0] ?? null;
   }
 
   /** NLC plus its fare group, for fare lookups. */
