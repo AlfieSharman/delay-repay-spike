@@ -143,6 +143,80 @@ function itineraryFallbackVerdict(
   };
 }
 
+/**
+ * Level-2 clip pinning: an accepted on-train clip names the service the customer
+ * was on, so we can measure that service's OWN delay (actual minus scheduled
+ * arrival) with no baseline inference - the most accurate case for a non-advance
+ * ticket. Scoped to single-leg journeys: the clip is matched to the candidate
+ * run whose actual window contains the clip time and which runs to the
+ * destination. Multi-leg (possible missed connections) falls through.
+ */
+function clipPinnedVerdict(
+  coupon: CouponType,
+  ticket: TicketInfo,
+  constraints: JourneyConstraints,
+  itinerary: PlannedItinerary,
+  toCrs: string,
+  threshold: number,
+): CouponVerdict | null {
+  if (itinerary.legs.length !== 1) return null;
+  const clips = constraints.onTrain.filter((s) => s.accepted && s.info.routeToCrs === toCrs);
+  if (clips.length === 0) return null;
+
+  const candidates = itinerary.candidatesByLeg[0] ?? [];
+  let pinned: ServiceRun | null = null;
+  for (const clip of clips) {
+    const onboard = candidates.filter(
+      (r) =>
+        !r.cancelled &&
+        r.actualDeparture !== null &&
+        r.actualArrival !== null &&
+        r.actualDeparture - 5 <= clip.timeMinutes &&
+        clip.timeMinutes <= r.actualArrival + 5,
+    );
+    // If several fit the clip time, take the tightest-fitting run.
+    for (const r of onboard) {
+      if (!pinned || r.actualArrival! - r.actualDeparture! < pinned.actualArrival! - pinned.actualDeparture!) {
+        pinned = r;
+      }
+    }
+    if (pinned) break;
+  }
+  if (!pinned || pinned.actualArrival === null) return null;
+
+  const delayMinutes = Math.max(0, pinned.actualArrival - pinned.scheduledArrival);
+  const band = bandForDelay(delayMinutes)?.label ?? null;
+  const eligible = delayMinutes >= threshold;
+  const leg = itinerary.legs[0]!;
+  const predictedLegs: PredictedLeg[] = [{
+    originCrs: leg.originCrs,
+    destinationCrs: leg.destinationCrs,
+    scheduledDeparture: pinned.scheduledDeparture,
+    scheduledArrival: pinned.scheduledArrival,
+    actualDeparture: pinned.actualDeparture,
+    actualArrival: pinned.actualArrival,
+    cancelled: false,
+    callingPoints: pinned.callingPoints ?? [leg.originCrs, leg.destinationCrs],
+    toc: pinned.toc,
+  }];
+  return {
+    coupon,
+    entitled: eligible,
+    reason: eligible ? null : delayMinutes === 0 ? 'NOT_DELAYED' : 'BELOW_THRESHOLD',
+    confidence: 'CONFIRMED',
+    predictedLegs,
+    delayMinutes: Number.isFinite(delayMinutes) ? delayMinutes : null,
+    band,
+    compensationPence: eligible ? compensationPence(band, ticket.fareType, ticket.pricePence) : null,
+    anomalies: [...constraints.anomalies],
+    explanation: [
+      `Clip pinned the service travelled (${leg.originCrs}->${leg.destinationCrs}, ` +
+        `sched arr ${formatMinutes(pinned.scheduledArrival)}, actual ${formatMinutes(pinned.actualArrival)}): ` +
+        `${delayMinutes} min late (threshold ${threshold}).`,
+    ],
+  };
+}
+
 /** The booked run within a leg's candidate runs, matched on scheduled times. */
 function findBookedRun(candidates: readonly ServiceRun[], leg: IntendedLeg): ServiceRun | undefined {
   return candidates.find(
@@ -170,6 +244,14 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
   const interchange = input.interchangeMinutes ?? DEFAULT_INTERCHANGE;
 
   const resolved = resolveBest(input.itineraries, constraints, interchange);
+
+  // Level 2 (clipped): an accepted clip identifies the exact service travelled,
+  // so measure that service's own delay - more accurate than any tap-based
+  // inference. Advance (level 1) is handled below; this is for walk-up.
+  if (resolved && ticket.kind !== 'advance') {
+    const clipVerdict = clipPinnedVerdict(coupon, ticket, constraints, resolved.itinerary, toCrs, threshold);
+    if (clipVerdict) return clipVerdict;
+  }
 
   // Walk-up itinerary baseline: when the customer's itinerary is known but the
   // scans don't establish a clean journey from the ticket origin - either
@@ -247,8 +329,8 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
   );
 
   // Confidence from how well the taps and train_info line up.
-  const directionAnomaly = constraints.onTrain.some((t) => t.routeToCrs === fromCrs);
-  const trainInfoConsistent = constraints.onTrain.some((t) => t.routeToCrs === toCrs);
+  const directionAnomaly = constraints.onTrain.some((t) => t.info.routeToCrs === fromCrs);
+  const trainInfoConsistent = constraints.onTrain.some((t) => t.info.routeToCrs === toCrs);
   const anomalyDowngrade = directionAnomaly || constraints.anomalies.length > 0;
   const strong =
     (result.signals.entryMatched ? 1 : 0) +

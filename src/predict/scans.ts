@@ -8,6 +8,7 @@ import { lookupReasonCode } from './reason-codes.js';
 import type {
   CouponType,
   JourneyConstraints,
+  OnTrainSighting,
   ScanEvent,
   ScanKind,
   ScanMode,
@@ -137,7 +138,7 @@ export function groupByCoupon(scans: readonly ScanEvent[]): Map<CouponType, Scan
 export function extractConstraints(coupon: CouponType, scans: readonly ScanEvent[]): JourneyConstraints {
   let entry: { crs: string; timeMinutes: number } | undefined;
   let exit: { crs: string; timeMinutes: number } | undefined;
-  const onTrain: TrainInfo[] = [];
+  const onTrain: OnTrainSighting[] = [];
   const reasonCodes: string[] = [];
   const anomalies: string[] = [];
 
@@ -146,7 +147,9 @@ export function extractConstraints(coupon: CouponType, scans: readonly ScanEvent
       if (scan.mode === 'entry' && !entry) entry = { crs: scan.stationCrs, timeMinutes: scan.timeMinutes };
       if (scan.mode === 'exit') exit = { crs: scan.stationCrs, timeMinutes: scan.timeMinutes };
     }
-    if (scan.kind === 'on-train' && scan.trainInfo) onTrain.push(scan.trainInfo);
+    if (scan.kind === 'on-train' && scan.trainInfo) {
+      onTrain.push({ info: scan.trainInfo, timeMinutes: scan.timeMinutes, accepted: true });
+    }
     if (scan.kind === 'rejected') {
       const where = scan.stationCrs ?? scan.stationNlc ?? 'unknown location';
       let reason = '';
@@ -155,8 +158,9 @@ export function extractConstraints(coupon: CouponType, scans: readonly ScanEvent
         reason = ` ${scan.reasonCode} (${lookupReasonCode(scan.reasonCode).meaning})`;
       }
       anomalies.push(`Rejected scan${reason} at ${where} ${formatMin(scan.timeMinutes)}`);
-      // A rejected scan may still name the train it was presented on.
-      if (scan.trainInfo) onTrain.push(scan.trainInfo);
+      // A rejected scan may still name the train it was presented on, but as an
+      // anomaly it must not pin the service (accepted: false).
+      if (scan.trainInfo) onTrain.push({ info: scan.trainInfo, timeMinutes: scan.timeMinutes, accepted: false });
     }
   }
 

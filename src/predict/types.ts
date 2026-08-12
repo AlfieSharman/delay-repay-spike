@@ -60,12 +60,21 @@ export interface TrainInfo {
   readonly serviceIds: readonly string[];
 }
 
+/** An on-train (clip) sighting: the parsed service plus when/whether it was seen. */
+export interface OnTrainSighting {
+  readonly info: TrainInfo;
+  /** Local wall-clock minutes the clip was recorded. */
+  readonly timeMinutes: number;
+  /** True for an accepted clip; false when derived from a rejected scan. */
+  readonly accepted: boolean;
+}
+
 /** Hard constraints a candidate journey must satisfy, from one coupon's scans. */
 export interface JourneyConstraints {
   readonly coupon: CouponType;
   readonly entry?: { readonly crs: string; readonly timeMinutes: number };
   readonly exit?: { readonly crs: string; readonly timeMinutes: number };
-  readonly onTrain: readonly TrainInfo[];
+  readonly onTrain: readonly OnTrainSighting[];
   /** Raw reason codes from rejected scans (looked up in reason-codes.ts). */
   readonly reasonCodes: readonly string[];
   readonly anomalies: readonly string[];

@@ -296,6 +296,48 @@ test('Walk-up fallback does not fire without a pinned itinerary', () => {
   assert.equal(v.reason, 'SERVICE_UNRESOLVED');
 });
 
+// -------------------------------- Clip pinning reports the ridden service's own delay
+// Two services: the clipped 17:00 (arr 18:25, 30 late) that the customer was on,
+// and an on-time 17:30 (arr 18:22). Best-achievable mixes the on-time actual
+// arrival with the earlier service's schedule and lands 27 min; the clip pins
+// the 17:00 and reports its own 30-min delay (band 30-59, not 15-29).
+const clipItin = (): PlannedItinerary => ({
+  legs: [leg('TON', 'CHX', '17:00', '17:55')],
+  candidatesByLeg: [[
+    run('ridden', '17:00', '17:55', '17:03', '18:25'), // clipped; 30 late
+    run('ontime', '17:30', '18:20', '17:31', '18:22'), // on time
+  ]],
+});
+const clipConstraints = (accepted: boolean): JourneyConstraints => ({
+  coupon: 'Single',
+  entry: { crs: 'TON', timeMinutes: at('16:58') },
+  exit: { crs: 'CHX', timeMinutes: at('18:27') },
+  onTrain: [{ info: { raw: 'HGS-CHX', routeFromCrs: 'HGS', routeToCrs: 'CHX', serviceIds: [] }, timeMinutes: at('17:10'), accepted }],
+  reasonCodes: [], anomalies: [],
+});
+
+test('Clip pins the ridden service and reports its own delay', () => {
+  const t = ticket({ utn: 'CLIP', ftot: 'SDS', kind: 'walk-up', fareType: 'single', pricePence: 2000 });
+  const v = assessCoupon({
+    ticket: t, coupon: 'Single', fromCrs: 'TON', toCrs: 'CHX', constraints: clipConstraints(true),
+    itineraries: [clipItin()], bookedLegs: null,
+  });
+  assert.equal(v.entitled, true);
+  assert.equal(v.delayMinutes, 30); // the clipped 17:00 service's own lateness
+  assert.equal(v.band, '30-59');
+  assert.equal(v.confidence, 'CONFIRMED');
+});
+
+test('A rejected clip does not pin the service (falls through to best-achievable)', () => {
+  const t = ticket({ utn: 'CLIP2', ftot: 'SDS', kind: 'walk-up', fareType: 'single', pricePence: 2000 });
+  const v = assessCoupon({
+    ticket: t, coupon: 'Single', fromCrs: 'TON', toCrs: 'CHX', constraints: clipConstraints(false),
+    itineraries: [clipItin()], bookedLegs: null,
+  });
+  assert.equal(v.delayMinutes, 27); // best-achievable, not the pinned 30
+  assert.equal(v.band, '15-29');
+});
+
 // ---------------------------------------------------------------- T5 East Farleigh -> Cannon Street
 test('T5: single destination scan, multi-leg with a cancelled connection, 18 late eligible', () => {
   const t = ticket({ utn: 'T5', ftot: 'SDS', kind: 'walk-up', fareType: 'single', pricePence: 1835 });
