@@ -100,7 +100,18 @@ async function assessTicket(
   for (const coupon of groups.keys()) {
     const couponScans = groups.get(coupon)!;
     const constraints = extractConstraints(coupon, couponScans);
-    const [fromCrs, toCrs] = coupon === 'Return' ? [destCrs, originCrs] : [originCrs, destCrs];
+    const plannedLegs = parseItineraryLegs(raw.Itinerary, coupon);
+
+    // The itinerary, when present, is authoritative for the journey endpoints.
+    // This is how a "London Terminals" (1072) destination gets its true
+    // terminal: the itinerary names it (via its final service), rather than the
+    // tool guessing a terminus from a clip or an arbitrary group member.
+    const [fromCrs, toCrs] =
+      plannedLegs && plannedLegs.length > 0
+        ? [plannedLegs[0]!.originCrs, plannedLegs[plannedLegs.length - 1]!.destinationCrs]
+        : coupon === 'Return'
+          ? [destCrs, originCrs]
+          : [originCrs, destCrs];
 
     if (!fromCrs || !toCrs) {
       verdicts.push(unresolved(coupon, 'NO_TRAVEL_EVIDENCE', 'Could not resolve origin/destination CRS.'));
@@ -111,7 +122,6 @@ async function assessTicket(
       let itineraries: PlannedItinerary[];
       let bookedLegs: IntendedLeg[] | null = null;
 
-      const plannedLegs = parseItineraryLegs(raw.Itinerary, coupon);
       if (plannedLegs) {
         // Use the customer's planned itinerary: it pins the legs directly.
         itineraries = [await provider.itineraryActuals(plannedLegs, exitFor(constraints, toCrs))];

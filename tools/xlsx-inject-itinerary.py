@@ -69,7 +69,22 @@ def train_info_origin(scans):
     return None
 
 
-def resolve_crs(conn, nlc, scans):
+def uid_terminus(conn, uid):
+    """The CRS a service (by schedule UID) terminates at - its LT record."""
+    if not uid:
+        return None
+    row = conn.execute(
+        """SELECT st.crs FROM calling_points cp
+             JOIN schedules s ON s.id = cp.schedule_id
+             JOIN stations st ON st.tiploc = cp.tiploc
+            WHERE s.uid = ? AND cp.record_type = 'LT' AND st.crs IS NOT NULL
+            LIMIT 1""",
+        (uid,),
+    ).fetchone()
+    return row[0] if row else None
+
+
+def resolve_crs(conn, nlc, scans, service_uid=None):
     row = conn.execute("SELECT crs, fare_group_nlc FROM locations WHERE nlc = ?", (nlc,)).fetchone()
     if not row:
         return None, "unknown NLC"
@@ -78,13 +93,19 @@ def resolve_crs(conn, nlc, scans):
         return crs, None
     members = {r[0] for r in conn.execute(
         "SELECT crs FROM locations WHERE fare_group_nlc = ? AND crs IS NOT NULL", (group,))}
-    for s in scans:  # a gate scan at a group member
+    for s in scans:  # 1. a gate scan physically at a group member
         st = s.get("STATION")
         if st:
             r = conn.execute("SELECT crs FROM locations WHERE nlc = ?", (st,)).fetchone()
             if r and r[0] in members:
-                return r[0], f"terminal from scan"
-    ti = train_info_origin(scans)  # else the train_info route origin
+                return r[0], "terminal from scan"
+    # 2. the true terminal named by the itinerary's (final) service - the
+    #    planned destination "London Terminals" hides. Preferred over guessing
+    #    from a clip, per the destination rule for a 1072 group.
+    term = uid_terminus(conn, service_uid)
+    if term and term in members:
+        return term, "terminal from itinerary service"
+    ti = train_info_origin(scans)  # 3. else a clip's route origin
     if ti and ti in members:
         return ti, "terminal from train_info"
     return None, "London terminal not resolvable"
@@ -121,7 +142,7 @@ def main():
                 coupon = coupon_of(scans)
                 cscans = [s for s in scans if (s.get("coupon_type") in (coupon, None))]
                 o_crs, o_note = resolve_crs(conn, t.get("OriginNLC"), cscans)
-                d_crs, d_note = resolve_crs(conn, t.get("DestinationNLC"), cscans)
+                d_crs, d_note = resolve_crs(conn, t.get("DestinationNLC"), cscans, service_uid=uid)
                 if dep and arr and o_crs and d_crs:
                     t["Itinerary"] = [{
                         "coupon_type": coupon,
