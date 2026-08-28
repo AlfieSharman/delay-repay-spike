@@ -164,8 +164,17 @@ export async function* streamStations(filePath: string): AsyncGenerator<StationR
 }
 
 /**
- * Streams the .MCA file and yields one SeSchedule per BS/BX block whose
- * ATOC code is "SE", without ever holding the whole file in memory.
+ * ATOC codes whose schedules we load. Southeastern (SE) is the spike's focus;
+ * Thameslink (TL) is included so cross-London onward legs (e.g. St Pancras ->
+ * Blackfriars, which continue off the SE network) can be modelled. Fares stay
+ * SE-only (see load.ts seCrsCodes), so this only adds timetable coverage.
+ */
+export const KEEP_ATOC = new Set(['SE', 'TL']);
+
+/**
+ * Streams the .MCA file and yields one SeSchedule per BS/BX block whose ATOC
+ * code is one we keep (see KEEP_ATOC), without ever holding the whole file in
+ * memory.
  */
 export async function* streamSeSchedules(filePath: string): AsyncGenerator<SeSchedule> {
   let currentBs: BsRecord | null = null;
@@ -173,7 +182,7 @@ export async function* streamSeSchedules(filePath: string): AsyncGenerator<SeSch
   let callingPoints: CallingPoint[] = [];
 
   function* flush(): Generator<SeSchedule> {
-    if (currentBs && currentBx && currentBx.atocCode === 'SE') {
+    if (currentBs && currentBx && KEEP_ATOC.has(currentBx.atocCode)) {
       yield { ...currentBs, ...currentBx, callingPoints };
     }
   }
