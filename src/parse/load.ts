@@ -102,7 +102,11 @@ async function loadTicketTypes(db: Database.Database): Promise<void> {
   }
 }
 
-/** The set of CRS codes that Southeastern schedules actually call at. */
+/**
+ * The set of CRS codes that Southeastern schedules actually call at. Filtered
+ * to SE explicitly (the schedules table also holds Thameslink now) so the fares
+ * filter stays SE-only - we add TL timetable coverage, not TL fares.
+ */
 function seCrsCodes(db: Database.Database): Set<string> {
   const rows = db
     .prepare(
@@ -111,7 +115,7 @@ function seCrsCodes(db: Database.Database): Set<string> {
       FROM calling_points cp
       JOIN stations s ON s.tiploc = cp.tiploc
       JOIN schedules sc ON sc.id = cp.schedule_id
-      WHERE s.crs IS NOT NULL
+      WHERE s.crs IS NOT NULL AND sc.atoc_code = 'SE'
     `,
     )
     .all() as { crs: string }[];

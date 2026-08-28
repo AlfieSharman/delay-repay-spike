@@ -47,8 +47,10 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
   `locations`, `ticket_types`, `flows`, `fares`. Re-created from scratch on every
   `npm run load` run.
 - `src/parse/timetable.ts` - streams the CIF `.MCA` file (BS/BX/LO/LI/LT records)
-  and the `.MSN` station names file. Keeps only schedules whose BX ATOC code is
-  `SE`. Field positions were confirmed by hand against the real feed files, since
+  and the `.MSN` station names file. Keeps schedules whose BX ATOC code is in
+  `KEEP_ATOC` (`SE` plus `TL` Thameslink, so cross-London onward legs like St
+  Pancras -> Blackfriars can be modelled; fares stay SE-only). Field positions
+  were confirmed by hand against the real feed files, since
   wiki.openraildata.com 403s non-browser clients.
 - `src/parse/fares.ts` - streams the fares `.LOC`, `.FFL` and `.TTY` files.
 - `src/parse/load.ts` - orchestrates the load in order: stations -> SE schedules ->
