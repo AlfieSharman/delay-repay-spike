@@ -166,7 +166,29 @@ npm run check -- TON CST 2026-07-02 0746 --advance
 npm run batch -- data/dr-spike-1
 ```
 
-`data/` and `.env` are git-ignored. The database and feeds are regenerable with
-`npm run download` then `npm run load`.
-</content>
-</invoke>
+**You must run `npm run download` and `npm run load` before anything else works.**
+`data/` (the raw NRDP feeds and the built `data/spike.db`) and `.env` are
+git-ignored and **not** in the repo or any PR, so a fresh clone has no data.
+Nothing - `npm run check`, `npm run batch`, `npm run query`, `npm run routes` -
+will run until you have downloaded the feeds and built the database. `npm test`
+and `npm run typecheck` are the exceptions: they use mocked data and need
+neither the feeds nor credentials.
+
+## Keeping the data current
+
+The NRDP feeds are **periodic snapshots, not live data**:
+
+- The **timetable** (CIF) is republished frequently (roughly weekly, with daily
+  updates); the copy in `data/` is whatever `npm run download` last fetched.
+- The **fares** and **routeing** feeds update on their own (less frequent)
+  cadence.
+- **HSP is queried live** for actual times, so it is always current - no ingest
+  needed there (subject to its ~2-day lag).
+
+For a one-off spike run, the snapshot is fine. **For a live service, the feeds
+would need to be re-ingested on a schedule** (e.g. a weekly `download` + `load`,
+or daily for the timetable) so predictions are made against the timetable that
+was actually in force on the travel date - an out-of-date timetable would
+mis-identify services and baselines. That scheduled ingest is a production
+concern, out of scope for the spike, but worth designing in when this is taken
+forward.
