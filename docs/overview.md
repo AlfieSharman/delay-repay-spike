@@ -3,8 +3,10 @@
 A shareable summary of what the spike does today, what is still to build, and
 how we test it. For the detailed technical notes and gotchas, see
 [CLAUDE.md](../CLAUDE.md). Deeper design docs:
-[service-prediction.md](service-prediction.md) and
-[routeing-guide.md](routeing-guide.md).
+[service-prediction.md](service-prediction.md),
+[routeing-guide.md](routeing-guide.md), and
+[cross-london-multileg.md](cross-london-multileg.md) (build vs Odyssey for
+cross-London journeys).
 
 ## Purpose
 
