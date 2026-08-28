@@ -165,11 +165,13 @@ export async function* streamStations(filePath: string): AsyncGenerator<StationR
 
 /**
  * ATOC codes whose schedules we load. Southeastern (SE) is the spike's focus;
- * Thameslink (TL) is included so cross-London onward legs (e.g. St Pancras ->
- * Blackfriars, which continue off the SE network) can be modelled. Fares stay
- * SE-only (see load.ts seCrsCodes), so this only adds timetable coverage.
+ * the rest are operators whose services connect with SE across London, so a
+ * cross-London onward leg can be modelled: Thameslink (TL, St Pancras/Blackfriars
+ * core), Southern (SN, Victoria/London Bridge), Elizabeth line (XR, Abbey Wood),
+ * Gatwick Express (GX, Victoria) and Great Northern (GN, Thameslink core). Fares
+ * stay SE-only (see load.ts seCrsCodes), so this only adds timetable coverage.
  */
-export const KEEP_ATOC = new Set(['SE', 'TL']);
+export const KEEP_ATOC = new Set(['SE', 'TL', 'SN', 'XR', 'GX', 'GN']);
 
 /**
  * Streams the .MCA file and yields one SeSchedule per BS/BX block whose ATOC
