@@ -56,6 +56,9 @@ export interface TrainInfo {
   readonly raw: string;
   readonly routeFromCrs: string | null;
   readonly routeToCrs: string | null;
+  /** The service's scheduled departure (minutes since midnight) from the leading
+   *  day+time token (e.g. "We1150" -> 11:50), or null if absent. */
+  readonly scheduledDeparture: number | null;
   /** Headcode / retail service ids, e.g. ["1H80", "SE2280"]. */
   readonly serviceIds: readonly string[];
 }

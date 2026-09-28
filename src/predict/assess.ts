@@ -24,6 +24,7 @@ import type {
   CouponVerdict,
   IntendedLeg,
   JourneyConstraints,
+  OnTrainSighting,
   PlannedItinerary,
   PredictedLeg,
   TicketInfo,
@@ -52,6 +53,10 @@ export interface AssessCouponInput {
   /** True when itineraries[0] is the customer's actual (pinned) itinerary, not
    *  an inferred candidate. Enables the walk-up itinerary-baseline fallback. */
   readonly itineraryPinned?: boolean;
+  /** Actual runs of services named by accepted clips, fetched to the
+   *  destination - lets a through service on which the destination is an
+   *  intermediate stop be pinned even though it isn't an itinerary leg. */
+  readonly clipServices?: readonly ServiceRun[];
   readonly threshold?: number;
   readonly interchangeMinutes?: number;
 }
@@ -143,13 +148,38 @@ function itineraryFallbackVerdict(
   };
 }
 
+/** The tightest-fitting run whose actual travel window contains an accepted
+ *  clip's time - i.e. the customer was on board then. */
+function pinClipRun(
+  clips: readonly OnTrainSighting[],
+  runs: readonly ServiceRun[],
+): ServiceRun | null {
+  let pinned: ServiceRun | null = null;
+  for (const clip of clips) {
+    for (const r of runs) {
+      if (r.cancelled || r.actualDeparture === null || r.actualArrival === null) continue;
+      if (r.actualDeparture - 5 > clip.timeMinutes || clip.timeMinutes > r.actualArrival + 5) continue;
+      // If several fit the clip time, take the tightest-fitting run.
+      if (!pinned || r.actualArrival - r.actualDeparture < pinned.actualArrival! - pinned.actualDeparture!) {
+        pinned = r;
+      }
+    }
+    if (pinned) break;
+  }
+  return pinned;
+}
+
 /**
  * Level-2 clip pinning: an accepted on-train clip names the service the customer
  * was on, so we can measure that service's OWN delay (actual minus scheduled
- * arrival) with no baseline inference - the most accurate case for a non-advance
- * ticket. Scoped to single-leg journeys: the clip is matched to the candidate
- * run whose actual window contains the clip time and which runs to the
- * destination. Multi-leg (possible missed connections) falls through.
+ * arrival at the destination) with no baseline inference - the most accurate
+ * case for a non-advance ticket. Two ways to find the service:
+ *  (a) it terminates at the destination on a single-leg itinerary - matched
+ *      within that leg's candidate runs (the original case); or
+ *  (b) it is a through service on which the destination is an intermediate stop,
+ *      so it isn't an itinerary leg - matched within `clipServices`, the runs
+ *      fetched to the destination for the clips. This covers a customer who
+ *      alights partway along a longer service.
  */
 function clipPinnedVerdict(
   coupon: CouponType,
@@ -158,45 +188,35 @@ function clipPinnedVerdict(
   itinerary: PlannedItinerary,
   toCrs: string,
   threshold: number,
+  clipServices: readonly ServiceRun[],
 ): CouponVerdict | null {
-  if (itinerary.legs.length !== 1) return null;
-  const clips = constraints.onTrain.filter((s) => s.accepted && s.info.routeToCrs === toCrs);
-  if (clips.length === 0) return null;
+  const clipsToDest = constraints.onTrain.filter((s) => s.accepted && s.info.routeToCrs === toCrs);
+  const acceptedClips = constraints.onTrain.filter((s) => s.accepted);
 
-  const candidates = itinerary.candidatesByLeg[0] ?? [];
   let pinned: ServiceRun | null = null;
-  for (const clip of clips) {
-    const onboard = candidates.filter(
-      (r) =>
-        !r.cancelled &&
-        r.actualDeparture !== null &&
-        r.actualArrival !== null &&
-        r.actualDeparture - 5 <= clip.timeMinutes &&
-        clip.timeMinutes <= r.actualArrival + 5,
-    );
-    // If several fit the clip time, take the tightest-fitting run.
-    for (const r of onboard) {
-      if (!pinned || r.actualArrival! - r.actualDeparture! < pinned.actualArrival! - pinned.actualDeparture!) {
-        pinned = r;
-      }
-    }
-    if (pinned) break;
+  let originCrs = toCrs;
+  if (itinerary.legs.length === 1 && clipsToDest.length > 0) {
+    pinned = pinClipRun(clipsToDest, itinerary.candidatesByLeg[0] ?? []);
+    if (pinned) originCrs = itinerary.legs[0]!.originCrs;
+  }
+  if (!pinned && clipServices.length > 0) {
+    pinned = pinClipRun(acceptedClips, clipServices);
+    if (pinned) originCrs = pinned.callingPoints?.[0] ?? toCrs;
   }
   if (!pinned || pinned.actualArrival === null) return null;
 
   const delayMinutes = Math.max(0, pinned.actualArrival - pinned.scheduledArrival);
   const band = bandForDelay(delayMinutes)?.label ?? null;
   const eligible = delayMinutes >= threshold;
-  const leg = itinerary.legs[0]!;
   const predictedLegs: PredictedLeg[] = [{
-    originCrs: leg.originCrs,
-    destinationCrs: leg.destinationCrs,
+    originCrs,
+    destinationCrs: toCrs,
     scheduledDeparture: pinned.scheduledDeparture,
     scheduledArrival: pinned.scheduledArrival,
     actualDeparture: pinned.actualDeparture,
     actualArrival: pinned.actualArrival,
     cancelled: false,
-    callingPoints: pinned.callingPoints ?? [leg.originCrs, leg.destinationCrs],
+    callingPoints: pinned.callingPoints ?? [originCrs, toCrs],
     toc: pinned.toc,
   }];
   return {
@@ -210,7 +230,7 @@ function clipPinnedVerdict(
     compensationPence: eligible ? compensationPence(band, ticket.fareType, ticket.pricePence) : null,
     anomalies: [...constraints.anomalies],
     explanation: [
-      `Clip pinned the service travelled (${leg.originCrs}->${leg.destinationCrs}, ` +
+      `Clip pinned the service travelled (${originCrs}->${toCrs}, ` +
         `sched arr ${formatMinutes(pinned.scheduledArrival)}, actual ${formatMinutes(pinned.actualArrival)}): ` +
         `${delayMinutes} min late (threshold ${threshold}).`,
     ],
@@ -249,7 +269,7 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
   // so measure that service's own delay - more accurate than any tap-based
   // inference. Advance (level 1) is handled below; this is for walk-up.
   if (resolved && ticket.kind !== 'advance') {
-    const clipVerdict = clipPinnedVerdict(coupon, ticket, constraints, resolved.itinerary, toCrs, threshold);
+    const clipVerdict = clipPinnedVerdict(coupon, ticket, constraints, resolved.itinerary, toCrs, threshold, input.clipServices ?? []);
     if (clipVerdict) return clipVerdict;
   }
 

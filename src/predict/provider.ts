@@ -16,7 +16,7 @@ import {
   scheduledJourneysBetween,
   type OriginService,
 } from '../timetable/lookup.js';
-import type { IntendedLeg, PlannedItinerary, ScanEvent, TicketInfo } from './types.js';
+import type { IntendedLeg, OnTrainSighting, PlannedItinerary, ScanEvent, TicketInfo } from './types.js';
 
 const INTERCHANGE = 5;
 const MAX_ITINERARIES = 6;
@@ -207,6 +207,30 @@ export class BatchDataProvider {
       candidatesByLeg.push(await this.legActuals(leg.originCrs, leg.destinationCrs, leg.scheduledDeparture - 20, toTime));
     }
     return { legs: [...legs], candidatesByLeg };
+  }
+
+  /**
+   * Actual runs of the services named by accepted on-train clips, fetched to the
+   * customer's destination. A clip can name a through service on which the
+   * destination is only an intermediate stop, so that service isn't among the
+   * itinerary's leg candidates. Fetching it here lets the assessor pin it and
+   * measure its own delay at the destination. Narrowed to the clip's own
+   * scheduled departure (from train_info) so it resolves the specific service,
+   * not near neighbours - important since HSP exposes no headcode/RSID to match.
+   */
+  async clipServiceRuns(clips: readonly OnTrainSighting[], toCrs: string): Promise<ServiceRun[]> {
+    const byId = new Map<string, ServiceRun>();
+    for (const clip of clips) {
+      const from = clip.info.routeFromCrs;
+      if (!clip.accepted || !from || from === toCrs) continue;
+      // The clip's own scheduled departure identifies the specific service, so
+      // query a tight window around it (HSP has no headcode/RSID to match on).
+      // Without it, fall back to any service on board at the clip time.
+      const dep = clip.info.scheduledDeparture;
+      const [fromMin, toMin] = dep !== null ? [dep - 5, dep + 5] : [clip.timeMinutes - 180, clip.timeMinutes];
+      for (const run of await this.legActuals(from, toCrs, fromMin, toMin)) byId.set(run.id, run);
+    }
+    return [...byId.values()];
   }
 
   /** Builds the booked itinerary for an Advance ticket (inferred if needed). */

@@ -48,6 +48,7 @@ export function parseTrainInfo(raw: string | null | undefined): TrainInfo | null
   const tokens = raw.trim().split(/\s+/);
   let routeFromCrs: string | null = null;
   let routeToCrs: string | null = null;
+  let scheduledDeparture: number | null = null;
   const serviceIds: string[] = [];
 
   for (const token of tokens) {
@@ -57,6 +58,12 @@ export function parseTrainInfo(raw: string | null | undefined): TrainInfo | null
       routeToCrs = route[2]!;
       continue;
     }
+    // Leading day+time token, e.g. "We1150" -> departs 11:50.
+    const dayTime = /^[A-Za-z]{2}(\d{2})(\d{2})$/.exec(token);
+    if (dayTime) {
+      scheduledDeparture = Number(dayTime[1]) * 60 + Number(dayTime[2]);
+      continue;
+    }
     if (/\d/.test(token) && /[A-Z]/.test(token)) {
       // e.g. "1H80/SE2280" -> ["1H80", "SE2280"]
       for (const part of token.split('/')) {
@@ -64,7 +71,7 @@ export function parseTrainInfo(raw: string | null | undefined): TrainInfo | null
       }
     }
   }
-  return { raw: raw.trim(), routeFromCrs, routeToCrs, serviceIds };
+  return { raw: raw.trim(), routeFromCrs, routeToCrs, scheduledDeparture, serviceIds };
 }
 
 function classify(mode: ScanMode, accepted: boolean, hasStation: boolean, trainInfo: TrainInfo | null): ScanKind {

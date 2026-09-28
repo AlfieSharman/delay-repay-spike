@@ -340,7 +340,7 @@ const clipConstraints = (accepted: boolean): JourneyConstraints => ({
   coupon: 'Single',
   entry: { crs: 'TON', timeMinutes: at('16:58') },
   exit: { crs: 'CHX', timeMinutes: at('18:27') },
-  onTrain: [{ info: { raw: 'HGS-CHX', routeFromCrs: 'HGS', routeToCrs: 'CHX', serviceIds: [] }, timeMinutes: at('17:10'), accepted }],
+  onTrain: [{ info: { raw: 'HGS-CHX', routeFromCrs: 'HGS', routeToCrs: 'CHX', scheduledDeparture: null, serviceIds: [] }, timeMinutes: at('17:10'), accepted }],
   reasonCodes: [], anomalies: [],
 });
 
@@ -364,6 +364,45 @@ test('A rejected clip does not pin the service (falls through to best-achievable
   });
   assert.equal(v.delayMinutes, 27); // best-achievable, not the pinned 30
   assert.equal(v.band, '15-29');
+});
+
+// A clip can name a through service on which the destination is an intermediate
+// stop (customer alights partway), so it isn't an itinerary leg. It is pinned
+// from the separately-fetched clipServices and its OWN delay at the destination
+// is measured. Regression for TRB26SQNNGT (rode a 14-late Charing Cross service
+// to Tonbridge; the booked KTH->ORP->TON itinerary ran on time).
+test('Clip pins a through service where the destination is an intermediate stop', () => {
+  const t = ticket({ utn: 'CLIPMID', ftot: 'CDS', kind: 'walk-up', fareType: 'single', pricePence: 900 });
+  const itin: PlannedItinerary = {
+    legs: [leg('KTH', 'ORP', '16:17', '16:39'), leg('ORP', 'TON', '16:52', '17:12')],
+    candidatesByLeg: [
+      [run('l1', '16:17', '16:39', '16:17', '16:39')], // booked leg 1, on time
+      [run('l2', '16:52', '17:12', '16:52', '17:13')], // booked leg 2, on time
+    ],
+  };
+  const constraints: JourneyConstraints = {
+    coupon: 'Single',
+    exit: { crs: 'TON', timeMinutes: at('17:52') },
+    // Clip on the Charing Cross -> Hastings service; its terminus is HGS, not TON.
+    onTrain: [{
+      info: { raw: 'CHX-HGS', routeFromCrs: 'CHX', routeToCrs: 'HGS', scheduledDeparture: at('16:45'), serviceIds: ['SE2102'] },
+      timeMinutes: at('17:33'), accepted: true,
+    }],
+    reasonCodes: [], anomalies: [],
+  };
+  // The clipped service fetched to TON: sched arr 17:29, actual 17:43 (14 late).
+  const clipService: ServiceRun = {
+    ...run('clip', '16:45', '17:29', '16:52', '17:43'),
+    callingPoints: ['CHX', 'WAE', 'LBG', 'SEV', 'TON'],
+  };
+  const v = assessCoupon({
+    ticket: t, coupon: 'Single', fromCrs: 'KTH', toCrs: 'TON', constraints,
+    itineraries: [itin], bookedLegs: null, itineraryPinned: true, clipServices: [clipService],
+  });
+  assert.equal(v.delayMinutes, 14); // the ridden service's own delay, not the on-time booked 1 min
+  assert.equal(v.entitled, false); // 14 < 15 placeholder threshold
+  assert.equal(v.reason, 'BELOW_THRESHOLD');
+  assert.equal(v.confidence, 'CONFIRMED');
 });
 
 // ---------------------------------------------------------------- T5 East Farleigh -> Cannon Street

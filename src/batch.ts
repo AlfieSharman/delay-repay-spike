@@ -148,8 +148,10 @@ async function assessTicket(
         continue;
       }
 
+      const clipServices = await provider.clipServiceRuns(constraints.onTrain, toCrs);
+
       verdicts.push(
-        assessCoupon({ ticket, coupon, fromCrs, toCrs, constraints, itineraries, bookedLegs, routeDef, resolveRouteingPoints, restrictionDef, itineraryPinned: plannedLegs != null }),
+        assessCoupon({ ticket, coupon, fromCrs, toCrs, constraints, itineraries, bookedLegs, routeDef, resolveRouteingPoints, restrictionDef, itineraryPinned: plannedLegs != null, clipServices }),
       );
     } catch (err) {
       verdicts.push(unresolved(coupon, 'NO_HSP_DATA_YET', `HSP lookup failed: ${(err as Error).message}`));
