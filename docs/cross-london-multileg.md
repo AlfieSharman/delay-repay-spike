@@ -24,7 +24,7 @@ The batch today mis-handles this: it resolves the destination to the
 **interchange** (where the outward exit scan is) and assesses only the first
 leg. For the worked example (`TRBYW25Q8FL`) it returned "0m NOT_DELAYED".
 
-## What we found on the worked example
+## What we found on the worked examples
 
 `TRBYW25Q8FL` (Gravesend -> Blackfriars via a St Pancras change) was approved by
 the live system at band **60-119**. Once the Thameslink timetable was loaded and
@@ -40,8 +40,36 @@ Pancras by 06:52 (exit tap) and caught an **on-time** Thameslink to Blackfriars
   ~34 min (30-59).
 
 The point of a cross-London build is therefore **not** to match the live award,
-but to produce the *correct* (small, in this case) verdict automatically and so
-**surface over-payments** like this one.
+but to produce the *correct* verdict automatically. As the second example shows,
+the same gap also **under**-pays, so the goal is an accurate verdict either way,
+not just catching over-payments.
+
+`TRB2VYL3Q3H` (Hastings -> Honiton, a Super Off-Peak Return, changing from
+Southeastern at Waterloo East to South Western Railway at Waterloo) is the
+mirror case: the batch returned **"0 min, not delayed"**, but the customer was
+genuinely delayed **~115 minutes (band 60-119)**. From HSP:
+
+- The Southeastern leg (the 13:30 Hastings -> Charing Cross) ran **27 min late**
+  into London (London Bridge 15:20 vs 14:53), and the customer's exit tap at
+  Waterloo East was **15:35**.
+- Their booked onward service, the **15:20 Waterloo -> Honiton** (arr 18:42),
+  had already left Waterloo before they were even through the Waterloo East gate,
+  so they missed it.
+- The **only** later Honiton service that day was the **17:23**, arriving Honiton
+  **20:37**. Best-achievable at the true destination is therefore ~115 min late
+  against the 18:42 itinerary.
+
+The batch measured the planned 15:20 service (which ran on time to Honiton 18:41)
+instead of modelling the broken connection, so it saw no delay. Both worked
+examples come from the same root: the tool assesses the *planned* onward service,
+not the one the customer could actually catch after a disrupted Southeastern leg.
+`TRB2VYL3Q3H` is the clearer motivator, because it is an eligible claim the tool
+currently misses entirely.
+
+(Two narrower, non-cross-London relatives of this were fixed in the model
+itself: a cancelled intended service re-basing the delay onto its replacement,
+and a clip on a through service where the destination is an intermediate stop.
+The remaining cross-London case needs the multi-leg reconstruction below.)
 
 ## What is already in place
 
