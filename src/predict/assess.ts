@@ -295,11 +295,21 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
       constraints.entry && constraints.entry.crs === fromCrs
         ? constraints.entry.timeMinutes
         : predictedLegs[0]!.scheduledDeparture;
+    // Intended-arrival baseline. When the itinerary is pinned but the customer
+    // isn't scanned from the origin (boarded downstream, or the intended service
+    // was cancelled and they took a later one), the itinerary's own final
+    // scheduled arrival is the baseline - not a best-achievable arrival
+    // recomputed from `ready`, which would exclude the cancelled/earlier intended
+    // service and understate the delay. Fully-scanned walk-ups (entry tap at the
+    // origin) keep the best-achievable rule.
+    const itineraryArrival = itinerary.legs[itinerary.legs.length - 1]!.scheduledArrival;
     const intendedArrival =
-      itinerary.legs.length === 1
-        ? intendedArrivalSingleLeg(itinerary.candidatesByLeg[0] ?? [], ready) ??
-          predictedLegs[predictedLegs.length - 1]!.scheduledArrival
-        : itinerary.legs[itinerary.legs.length - 1]!.scheduledArrival;
+      input.itineraryPinned && !entryAtOrigin
+        ? itineraryArrival
+        : itinerary.legs.length === 1
+          ? intendedArrivalSingleLeg(itinerary.candidatesByLeg[0] ?? [], ready) ??
+            predictedLegs[predictedLegs.length - 1]!.scheduledArrival
+          : itineraryArrival;
 
     const legs: Leg[] = itinerary.legs.map((l, i) => ({
       origin: l.originCrs,

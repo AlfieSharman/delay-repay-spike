@@ -296,6 +296,34 @@ test('Walk-up fallback does not fire without a pinned itinerary', () => {
   assert.equal(v.reason, 'SERVICE_UNRESOLVED');
 });
 
+// Pinned itinerary, no entry tap at the origin, and the intended service is
+// cancelled before an UNGATED destination (no exit tap), so the fallback can't
+// self-resolve and the engine path runs. The baseline must stay the itinerary's
+// intended arrival (08:56), not drift to the replacement service's own schedule
+// (09:05). Regression for the cross-London TRB2YWZBWVY under-call.
+test('Walk-up: intended service cancelled, ungated destination, keeps the itinerary baseline', () => {
+  const t = ticket({ utn: 'WUCANC', ftot: 'SWS', kind: 'walk-up', fareType: 'single', pricePence: 1695 });
+  const itin: PlannedItinerary = {
+    legs: [leg('LBG', 'RBR', '17:50', '18:56')],
+    candidatesByLeg: [[
+      run('intended', '17:50', '18:56', '17:50', null), // cancelled before RBR
+      run('repl', '17:54', '19:05', '17:54', '19:13'), // the service actually completed
+    ]],
+  };
+  const constraints: JourneyConstraints = {
+    coupon: 'Single',
+    entry: { crs: 'CST', timeMinutes: at('17:37') }, // entry, but not at the ticket origin
+    onTrain: [], reasonCodes: [], anomalies: [],
+  };
+  const v = assessCoupon({
+    ticket: t, coupon: 'Single', fromCrs: 'LBG', toCrs: 'RBR', constraints,
+    itineraries: [itin], bookedLegs: null, itineraryPinned: true,
+  });
+  assert.equal(v.entitled, true);
+  assert.equal(v.delayMinutes, 17); // 19:13 actual vs 18:56 intended, not 8 vs 19:05
+  assert.equal(v.band, '15-29');
+});
+
 // -------------------------------- Clip pinning reports the ridden service's own delay
 // Two services: the clipped 17:00 (arr 18:25, 30 late) that the customer was on,
 // and an on-time 17:30 (arr 18:22). Best-achievable mixes the on-time actual
