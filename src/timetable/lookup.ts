@@ -179,6 +179,93 @@ export function scheduledJourneysBetween(
     .sort((a, b) => a.scheduledDeparture - b.scheduledDeparture);
 }
 
+/** The dense geographical path of one CIF service between two stations. */
+export interface GeographicalPath {
+  readonly uid: string;
+  readonly scheduledDeparture: number;
+  readonly scheduledArrival: number;
+  /** Ordered CRS codes the service stops at OR passes through, origin to
+   *  destination inclusive. Junctions with no CRS are dropped. */
+  readonly crsPath: readonly string[];
+}
+
+/**
+ * The geographical path of the CIF service(s) running originCrs -> destCrs on a
+ * date: the ordered CRS the service stops at OR passes through, built from the
+ * stored pass records (LI records with only a pass time), origin to destination
+ * inclusive. This is the dense node path the routeing-guide base-route tracer
+ * (`RouteingGuide.followsPermittedRoute`) needs and HSP can't give: HSP reports
+ * only stops, but the points that decide a route (e.g. Ebbsfleet vs Dartford)
+ * are often passed through, not stopped at. STP-resolved like the other lookups.
+ */
+export function geographicalPath(
+  db: Database.Database,
+  originCrs: string,
+  destCrs: string,
+  date: string,
+): GeographicalPath[] {
+  const originTiplocs = tiplocsForCrs(db, originCrs);
+  const destTiplocs = tiplocsForCrs(db, destCrs);
+  if (originTiplocs.length === 0 || destTiplocs.length === 0) return [];
+
+  const originPlaceholders = originTiplocs.map(() => '?').join(',');
+  const destPlaceholders = destTiplocs.map(() => '?').join(',');
+
+  interface PathRow extends ScheduleRow {
+    readonly origin_seq: number;
+    readonly dest_seq: number;
+    readonly scheduled_departure: number;
+    readonly scheduled_arrival: number;
+  }
+
+  const rows = db
+    .prepare(
+      `
+      SELECT sc.id, sc.uid, sc.stp_indicator, sc.date_from, sc.date_to, sc.days_run, sc.category, sc.retail_train_id,
+             o.seq AS origin_seq, d.seq AS dest_seq,
+             o.scheduled_departure AS scheduled_departure,
+             d.scheduled_arrival AS scheduled_arrival
+      FROM schedules sc
+      JOIN calling_points o ON o.schedule_id = sc.id
+        AND o.tiploc IN (${originPlaceholders}) AND o.scheduled_departure IS NOT NULL
+      JOIN calling_points d ON d.schedule_id = sc.id
+        AND d.tiploc IN (${destPlaceholders}) AND d.scheduled_arrival IS NOT NULL
+        AND d.seq > o.seq
+    `,
+    )
+    .all(...originTiplocs, ...destTiplocs) as PathRow[];
+
+  const active = resolveActive(rows.filter((r) => isActiveOnDate(r, date)));
+
+  // The CRS-bearing points (stops and pass-through stations) between the origin
+  // and destination sequence, in order. Junctions without a CRS are excluded.
+  const pathStmt = db.prepare(
+    `
+    SELECT st.crs AS crs
+    FROM calling_points cp
+    JOIN stations st ON st.tiploc = cp.tiploc
+    WHERE cp.schedule_id = ? AND cp.seq BETWEEN ? AND ? AND st.crs IS NOT NULL
+    ORDER BY cp.seq
+  `,
+  );
+
+  return active
+    .map((r) => {
+      const crsRows = pathStmt.all(r.id, r.origin_seq, r.dest_seq) as { crs: string }[];
+      const crsPath: string[] = [];
+      for (const { crs } of crsRows) {
+        if (crsPath[crsPath.length - 1] !== crs) crsPath.push(crs); // drop consecutive repeats
+      }
+      return {
+        uid: r.uid,
+        scheduledDeparture: r.scheduled_departure,
+        scheduledArrival: r.scheduled_arrival,
+        crsPath,
+      };
+    })
+    .sort((a, b) => a.scheduledDeparture - b.scheduledDeparture);
+}
+
 /** A service leaving one station, with where it terminates. */
 export interface OriginService {
   readonly uid: string;

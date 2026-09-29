@@ -17,9 +17,12 @@ margin**, and **easements** (named exceptions).
 Crucially, this needs the journey's **geographical path** - the routeing
 points a train *passes through*, not just where it stops. A journey planner
 (e.g. Odyssey) has this natively because it *constructs* the journey from the
-full national timetable. Our spike works backwards from HSP stop data, so it
-does not have the passed-through points, which limits base-route validation
-(see the finding below).
+full national timetable. Working backwards from HSP stop data alone does not
+give the passed-through points, which is what limited base-route validation.
+That gap is now closed on the data side: `geographicalPath` (in
+`src/timetable/lookup.ts`) returns the ordered CRS a CIF service stops at **or
+passes through**, built from the stored pass records (see item 1 below). What
+remains is wiring that dense path into the tracer as a gate and validating it.
 
 ## Done and wired in
 
@@ -41,22 +44,29 @@ does not have the passed-through points, which limits base-route validation
 
 - **`RouteingGuide.followsPermittedRoute`** - the map-sequence tracer
   (RSPS5047 §7.3.5). Given an accurate node path it correctly accepts on-route
-  and rejects off-route paths (see `guide.test.ts`). It is **not** wired as a
-  validity gate because the node path we can build from HSP *stops* is too
-  sparse: it collapses to "a permitted route exists" (almost always true) and
-  cannot tell, say, a via-Ebbsfleet (HS1) journey from a via-Dartford (classic)
-  one, because the deciding points are passed, not stopped at. A gate that
-  passes everything would add false confidence, so it is left dormant.
+  and rejects off-route paths (see `guide.test.ts`). It is **not yet** wired as
+  a validity gate. The original blocker was the node path: built from HSP
+  *stops* it was too sparse and collapsed to "a permitted route exists" (almost
+  always true), unable to tell a via-Ebbsfleet (HS1) journey from a via-Dartford
+  (classic) one because the deciding points are passed, not stopped at. That
+  blocker is now removed - `geographicalPath` gives the dense passed-through path
+  (on GRV->STP it separates 36 via-Ebbsfleet HS1 services from 38 via-Dartford
+  classic ones). The remaining step is to feed that path into
+  `followsPermittedRoute` as a gate and validate it against Odyssey before it
+  can change verdicts; until then it stays dormant to avoid false rejects.
 
 ## Remaining work (in dependency order)
 
-1. **Geographical node path** - derive the routeing points each ridden service
-   *passes* from the CIF timetable (the schema already stores `scheduled_pass`;
-   phase-2 currently discards pass-only calling points, so that filter would
-   need relaxing). This is the unlock for everything below. Alternatively, call
-   Odyssey, which already has it.
-2. **Base permitted-route gate** - wire `followsPermittedRoute` once the node
-   path is accurate.
+1. **Geographical node path** - DONE. `geographicalPath` (in
+   `src/timetable/lookup.ts`) derives the ordered routeing points each CIF
+   service stops at or *passes* between two stations, from the stored
+   `scheduled_pass` records (phase-2 loads pass-only calling points, so no
+   re-ingest was needed - only the "services calling at" query filters them out).
+   Unit-tested in `lookup.test.ts`. This was the unlock for everything below.
+2. **Base permitted-route gate** - wire `followsPermittedRoute` on the dense
+   `geographicalPath` (per leg, concatenated across legs) and validate the
+   accept/reject calls against Odyssey before making it a gate. This is the next
+   increment; keep it dormant until validated to avoid false rejects.
 3. **Shortest-route / mileage margin** (RSPS5047 §7.2.4/7.2.6) - uses the
    station-link distances (`.RGD`, parsed shape available).
 4. **Deviations / doublebacks** (§7.2.8) and "no station twice" (§7.3.4).
