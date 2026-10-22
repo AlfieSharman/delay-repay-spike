@@ -130,6 +130,11 @@ function itineraryFallbackVerdict(
     for (let i = interchangeIdx + 1; i <= last; i++) {
       const leg = legs[i]!;
       const runs = itinerary.candidatesByLeg[i] ?? [];
+      // An entry tap at this leg's origin (tapped back in after a break of
+      // journey) floors when they could board it.
+      if (constraints.entry && constraints.entry.crs === leg.originCrs) {
+        ready = Math.max(ready, constraints.entry.timeMinutes);
+      }
       const boardable = runs.filter(
         (r) => !r.cancelled && r.actualDeparture !== null && r.actualArrival !== null && r.actualDeparture > ready,
       );
@@ -401,6 +406,11 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
       destination: l.destinationCrs,
       scheduledDeparture: i === 0 ? ready : l.scheduledDeparture,
       scheduledArrival: i === itinerary.legs.length - 1 ? intendedArrival : l.scheduledArrival,
+      // An entry tap at a later leg's origin (tapped back in after a break of
+      // journey) floors when the customer could board that leg.
+      ...(i > 0 && constraints.entry && constraints.entry.crs === l.originCrs
+        ? { readyNotBefore: constraints.entry.timeMinutes }
+        : {}),
     }));
     journey = {
       legs,

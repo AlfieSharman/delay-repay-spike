@@ -100,6 +100,13 @@ function simulate(
     const isFirstLeg = i === 0;
     const label = `Leg ${i + 1} (${leg.origin}->${leg.destination})`;
 
+    // A gateline tap at this leg's origin is a hard floor on when the customer
+    // could board it, whatever the previous leg's arrival says.
+    if (leg.readyNotBefore !== undefined && leg.readyNotBefore > readyTime) {
+      explanation.push(`${label}: tapped in at ${formatMinutes(leg.readyNotBefore)}, so not ready before then`);
+      readyTime = leg.readyNotBefore;
+    }
+
     let chosen: ServiceRun | null = null;
 
     if (onBooked) {

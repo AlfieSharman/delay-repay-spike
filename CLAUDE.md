@@ -188,6 +188,20 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
 - **Delay baseline differs by ticket type**: Advance is judged against the
   booked service; walk-up uses the eligibility engine's *flexible* mode (best
   achievable arrival vs the intended scheduled arrival).
+- **Gateline taps at leg boundaries are hard time anchors.** A tap-out at an
+  intermediate leg's destination is the interchange arrival: if the planned
+  onward service had already left, the batch chains the next catchable one
+  (and `itineraryActuals` fetches onward services to tap +240, since the next
+  train can be hours later). A tap-in at a later leg's origin (a break of
+  journey) is a floor, `Leg.readyNotBefore`, below which the engine will not
+  board a service however good it looks. Both came from real claims.
+- **Return coupons travel on their own date and need their own structure.**
+  The batch takes each coupon's date from its scans (an open return can be
+  days after `StartDate`) and clears the outward's `TimeValidFrom` for the
+  return. With no return itinerary supplied, the outward itinerary *reversed*
+  is used as the leg structure and the times are discovered from HSP anchored
+  on the return's scans (`structuredItinerary`); one-change walk-up discovery
+  cannot find a 2+ change journey.
 - **Destination-only multi-leg journeys are the hard case.** With just an exit
   tap the planner anchors on it and works backwards to find the interchange and
   first leg; the intended baseline is the earliest scheduled onward connection.

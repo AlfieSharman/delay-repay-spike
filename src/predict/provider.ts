@@ -245,6 +245,76 @@ export class BatchDataProvider {
     return [...byId.values()];
   }
 
+  /**
+   * Builds an itinerary from a known leg STRUCTURE (origins and destinations,
+   * no times) by discovering each leg's services from HSP, anchored on the
+   * coupon's scans. Used for a Return coupon when no return itinerary is
+   * supplied: the outward itinerary reversed gives the change points (which
+   * the one-change walk-up discovery can't find for a 2+ change journey), and
+   * the return's own scans give the times. Per leg the anchor is, in order: an
+   * entry tap at the leg's origin (including a break-of-journey re-entry on a
+   * later leg); for the first leg only, an accepted clip, else an exit tap at
+   * its destination (working back from it); otherwise the previous leg's
+   * scheduled arrival plus the interchange. Returns no itinerary, naming the
+   * leg, if the first leg can't be anchored (no evidence of when they set out)
+   * or a leg has no direct service after its anchor. The latter is a real
+   * case: a leg that is a through service in one direction or at one time of
+   * day may need an extra change at another (Tonbridge -> Strood has no direct
+   * evening train), and finding that change is journey planning.
+   */
+  async structuredItinerary(
+    structure: readonly { readonly originCrs: string; readonly destinationCrs: string }[],
+    entry: { readonly crs: string; readonly timeMinutes: number } | null,
+    exit: { readonly crs: string; readonly timeMinutes: number } | null,
+    clips: readonly OnTrainSighting[] = [],
+  ): Promise<{ itinerary: PlannedItinerary | null; failedLeg: string | null }> {
+    const legs: IntendedLeg[] = [];
+    const candidatesByLeg: ServiceRun[][] = [];
+    const rideable = (r: ServiceRun): boolean => !r.cancelled && r.actualDeparture !== null && r.actualArrival !== null;
+
+    for (let i = 0; i < structure.length; i++) {
+      const { originCrs, destinationCrs } = structure[i]!;
+      const failed = { itinerary: null, failedLeg: `${originCrs}->${destinationCrs}` };
+      const exitHere = exit && exit.crs === destinationCrs ? exit.timeMinutes : null;
+      let runs: ServiceRun[];
+      let intended: ServiceRun | undefined;
+
+      if (entry && entry.crs === originCrs) {
+        const from = entry.timeMinutes;
+        runs = await this.legActuals(originCrs, destinationCrs, from - 15, Math.max(from + 180, exitHere ?? 0));
+        intended = runs.find((r) => r.scheduledDeparture >= from);
+      } else if (i === 0) {
+        const clip = clips.find((c) => c.accepted);
+        if (clip) {
+          runs = await this.legActuals(originCrs, destinationCrs, clip.timeMinutes - 180, clip.timeMinutes + 60);
+          intended = runs.find(
+            (r) => rideable(r) && r.actualDeparture! - 5 <= clip.timeMinutes && clip.timeMinutes <= r.actualArrival! + 5,
+          );
+        } else if (exitHere !== null) {
+          runs = await this.legActuals(originCrs, destinationCrs, exitHere - 240, exitHere);
+          const arrived = runs.filter((r) => rideable(r) && r.actualArrival! <= exitHere);
+          intended = arrived.length > 0 ? arrived.reduce((b, r) => (r.actualArrival! > b.actualArrival! ? r : b)) : undefined;
+        } else {
+          return failed;
+        }
+      } else {
+        const from = legs[i - 1]!.scheduledArrival + INTERCHANGE;
+        runs = await this.legActuals(originCrs, destinationCrs, from - 15, Math.max(from + 180, exitHere ?? 0));
+        intended = runs.find((r) => r.scheduledDeparture >= from);
+      }
+
+      if (!intended) return failed;
+      legs.push({
+        originCrs,
+        destinationCrs,
+        scheduledDeparture: intended.scheduledDeparture,
+        scheduledArrival: intended.scheduledArrival,
+      });
+      candidatesByLeg.push(runs);
+    }
+    return { itinerary: { legs, candidatesByLeg }, failedLeg: null };
+  }
+
   /** Builds the booked itinerary for an Advance ticket (inferred if needed). */
   async advanceItinerary(
     fromCrs: string,

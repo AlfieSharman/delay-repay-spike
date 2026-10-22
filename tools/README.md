@@ -39,7 +39,9 @@ Endpoint CRS come from the ticket Origin/Destination NLC; a London-terminals
 group is resolved to the terminal the scans used (a gate scan at a member,
 else the `train_info` route origin). Prints per ticket what it injected or why
 it couldn't. Known limits: only the outward/single itinerary is in the sheet
-(return coupons get none), and a two-service (cross-London change) UID is
+(return coupons get none; the batch then reverses the outward itinerary for the
+return's leg structure and discovers its times from the return's own scans, on
+the return's own date), and a two-service (cross-London change) UID is
 emitted as a single origin->destination leg with the overall times - enough for
 the intended-arrival baseline, not full multi-leg modelling.
 

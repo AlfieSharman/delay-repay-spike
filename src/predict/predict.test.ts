@@ -358,6 +358,50 @@ test('Walk-up: exit tap at the interchange chains the next catchable onward serv
   assert.equal(v.confidence, 'INFERRED');
 });
 
+// Break of journey on a return: exited Waterloo 13:54, tapped back in at
+// Waterloo East 19:06 for the evening train. Both the fallback chain and the
+// engine path must floor the onward leg at the tap-in, not board the 14:15.
+// Regression for TRB2VYL3Q3H's return (24 Aug).
+const breakOfJourneyLegs = () => [leg('HON', 'WAT', '10:30', '13:20'), leg('WAE', 'HGS', '19:15', '21:00')];
+const breakOfJourneyOnward = () => [
+  run('early', '14:15', '15:50', '14:15', '15:50'), // boardable after the 13:54 exit, but they weren't there
+  run('late', '19:15', '21:00', '19:16', '21:20'), // what they actually took, 20 late
+];
+const breakOfJourneyConstraints = (): JourneyConstraints => ({
+  coupon: 'Return',
+  entry: { crs: 'WAE', timeMinutes: at('19:06') }, // tapped back in at the onward leg's origin
+  exit: { crs: 'WAT', timeMinutes: at('13:54') }, // tapped out at the change point
+  onTrain: [], reasonCodes: [], anomalies: [],
+});
+
+test('Fallback chain floors the onward leg at a tap-in after a break of journey', () => {
+  const t = ticket({ utn: 'BOJ1', ftot: 'SVR', kind: 'walk-up', fareType: 'return', pricePence: 9140 });
+  const itin: PlannedItinerary = {
+    legs: breakOfJourneyLegs(),
+    candidatesByLeg: [[run('l1', '10:30', '13:20', '10:31', null)], breakOfJourneyOnward()], // leg 1 arrival blank -> fallback
+  };
+  const v = assessCoupon({
+    ticket: t, coupon: 'Return', fromCrs: 'HON', toCrs: 'HGS', constraints: breakOfJourneyConstraints(),
+    itineraries: [itin], bookedLegs: null, itineraryPinned: true,
+  });
+  assert.equal(v.delayMinutes, 20); // 21:20 vs 21:00 on the 19:15, not 0 on the 14:15
+  assert.equal(v.entitled, true);
+});
+
+test('Engine path (structured, unpinned) floors the onward leg at a tap-in too', () => {
+  const t = ticket({ utn: 'BOJ2', ftot: 'SVR', kind: 'walk-up', fareType: 'return', pricePence: 9140 });
+  const itin: PlannedItinerary = {
+    legs: breakOfJourneyLegs(),
+    candidatesByLeg: [[run('l1', '10:30', '13:20', '10:31', '13:22')], breakOfJourneyOnward()],
+  };
+  const v = assessCoupon({
+    ticket: t, coupon: 'Return', fromCrs: 'HON', toCrs: 'HGS', constraints: breakOfJourneyConstraints(),
+    itineraries: [itin], bookedLegs: null, // not pinned: the reversed-outward structure case
+  });
+  assert.equal(v.delayMinutes, 20);
+  assert.equal(v.band, '15-29');
+});
+
 // -------------------------------- Clip pinning reports the ridden service's own delay
 // Two services: the clipped 17:00 (arr 18:25, 30 late) that the customer was on,
 // and an on-time 17:30 (arr 18:22). Best-achievable mixes the on-time actual

@@ -102,13 +102,30 @@ async function assessTicket(
     const constraints = extractConstraints(coupon, couponScans);
     const plannedLegs = parseItineraryLegs(raw.Itinerary, coupon);
 
+    // Each coupon is travelled on its own date: an open return can be days
+    // after the ticket's StartDate. Take it from the coupon's scans, and give
+    // this coupon a provider (HSP + timetable) on that date.
+    const travelDate = couponScans.map((s) => s.date).sort()[0] ?? raw.StartDate;
+    const dated = new BatchDataProvider(db, hsp, travelDate);
+
+    // A Return with no itinerary of its own takes the outward itinerary
+    // reversed as its leg STRUCTURE (the change points); the times come from
+    // the return's scans and HSP (structuredItinerary). The one-change walk-up
+    // discovery can't find a 2+ change journey, so this is what makes returns
+    // like Tunbridge Wells -> Chatham (three legs) resolvable at all.
+    const outwardLegs = coupon === 'Return' && !plannedLegs ? parseItineraryLegs(raw.Itinerary, 'Outward') : null;
+    const structure = outwardLegs
+      ? [...outwardLegs].reverse().map((l) => ({ originCrs: l.destinationCrs, destinationCrs: l.originCrs }))
+      : null;
+
     // The itinerary, when present, is authoritative for the journey endpoints.
     // This is how a "London Terminals" (1072) destination gets its true
     // terminal: the itinerary names it (via its final service), rather than the
     // tool guessing a terminus from a clip or an arbitrary group member.
+    const endpoints = plannedLegs && plannedLegs.length > 0 ? plannedLegs : structure;
     const [fromCrs, toCrs] =
-      plannedLegs && plannedLegs.length > 0
-        ? [plannedLegs[0]!.originCrs, plannedLegs[plannedLegs.length - 1]!.destinationCrs]
+      endpoints && endpoints.length > 0
+        ? [endpoints[0]!.originCrs, endpoints[endpoints.length - 1]!.destinationCrs]
         : coupon === 'Return'
           ? [destCrs, originCrs]
           : [originCrs, destCrs];
@@ -118,24 +135,41 @@ async function assessTicket(
       continue;
     }
 
+    // The outward's TimeValidFrom does not constrain the return, and validity
+    // date checks (restriction date bands) must use this coupon's travel date.
+    const couponTicket: TicketInfo = {
+      ...ticket,
+      startDate: travelDate,
+      timeValidFrom: coupon === 'Return' ? null : ticket.timeValidFrom,
+    };
+
     try {
       let itineraries: PlannedItinerary[];
       let bookedLegs: IntendedLeg[] | null = null;
+      let unresolvedWhy = '';
 
       if (plannedLegs) {
         // Use the customer's planned itinerary: it pins the legs directly.
-        itineraries = [await provider.itineraryActuals(plannedLegs, constraints.exit ?? null)];
+        itineraries = [await dated.itineraryActuals(plannedLegs, constraints.exit ?? null)];
         bookedLegs = meta.kind === 'advance' ? plannedLegs : null;
+      } else if (structure) {
+        const built = await dated.structuredItinerary(structure, constraints.entry ?? null, constraints.exit ?? null, constraints.onTrain);
+        itineraries = built.itinerary ? [built.itinerary] : [];
+        if (built.failedLeg) {
+          unresolvedWhy =
+            ` Reversed the outward itinerary (${structure.map((l) => l.originCrs).join('>')}>${toCrs}) but found no direct ` +
+            `${built.failedLeg} service after the previous leg; the return probably needed an extra change, which needs journey planning.`;
+        }
       } else if (meta.kind === 'advance') {
         // No itinerary supplied: infer the booked service from TimeValidFrom.
         const bookedDeparture = timeValidFrom
           ? parseHHMM(timeValidFrom.replace(':', ''))
           : entryFor(constraints, fromCrs) ?? 12 * 60;
-        const built = await provider.advanceItinerary(fromCrs, toCrs, bookedDeparture);
+        const built = await dated.advanceItinerary(fromCrs, toCrs, bookedDeparture);
         itineraries = built.itineraries;
         bookedLegs = built.bookedLegs;
       } else {
-        itineraries = await provider.walkUpItineraries(
+        itineraries = await dated.walkUpItineraries(
           fromCrs,
           toCrs,
           entryFor(constraints, fromCrs),
@@ -144,14 +178,14 @@ async function assessTicket(
       }
 
       if (itineraries.length === 0) {
-        verdicts.push(unresolved(coupon, 'SERVICE_UNRESOLVED', `No services found for ${fromCrs}->${toCrs} on ${raw.StartDate}.`));
+        verdicts.push(unresolved(coupon, 'SERVICE_UNRESOLVED', `No services found for ${fromCrs}->${toCrs} on ${travelDate}.${unresolvedWhy}`));
         continue;
       }
 
-      const clipServices = await provider.clipServiceRuns(constraints.onTrain, toCrs);
+      const clipServices = await dated.clipServiceRuns(constraints.onTrain, toCrs);
 
       verdicts.push(
-        assessCoupon({ ticket, coupon, fromCrs, toCrs, constraints, itineraries, bookedLegs, routeDef, resolveRouteingPoints, restrictionDef, itineraryPinned: plannedLegs != null, clipServices }),
+        assessCoupon({ ticket: couponTicket, coupon, fromCrs, toCrs, constraints, itineraries, bookedLegs, routeDef, resolveRouteingPoints, restrictionDef, itineraryPinned: plannedLegs != null, clipServices }),
       );
     } catch (err) {
       verdicts.push(unresolved(coupon, 'NO_HSP_DATA_YET', `HSP lookup failed: ${(err as Error).message}`));

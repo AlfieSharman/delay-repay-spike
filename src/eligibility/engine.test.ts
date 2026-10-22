@@ -37,6 +37,30 @@ test('single leg on time is not eligible', () => {
   assert.equal(result.compensationPercentage, 0);
 });
 
+// A tap-in at a later leg's origin (break of journey) is a hard floor: the
+// engine must not board the earlier, better-looking service the customer
+// provably wasn't there for.
+test('readyNotBefore floors a later leg to the tap-in, skipping an earlier service', () => {
+  const journey: Journey = {
+    legs: [
+      { origin: 'HON', destination: 'WAT', scheduledDeparture: at('10:30'), scheduledArrival: at('13:20') },
+      { origin: 'WAE', destination: 'HGS', scheduledDeparture: at('19:15'), scheduledArrival: at('21:00'), readyNotBefore: at('19:06') },
+    ],
+    ticketKind: 'flexible',
+    fareType: 'return',
+    date: '2026-08-24',
+  };
+  const result = assessEligibility(journey, [
+    [run({ id: 'l1', scheduledDeparture: at('10:30'), scheduledArrival: at('13:20'), actualArrival: at('13:22') })],
+    [
+      run({ id: 'early', scheduledDeparture: at('14:15'), scheduledArrival: at('15:50') }), // boardable at 13:27, but they weren't there
+      run({ id: 'late', scheduledDeparture: at('19:15'), scheduledArrival: at('21:00'), actualDeparture: at('19:16'), actualArrival: at('21:20') }),
+    ],
+  ]);
+  assert.equal(result.delayMinutes, 20); // the 19:15 they actually took, 20 late; not the 14:15
+  assert.equal(result.eligible, true);
+});
+
 test('single leg delayed 20 min is eligible in the 15-29 band', () => {
   const journey: Journey = {
     legs: [{ origin: 'TON', destination: 'CST', scheduledDeparture: at('08:00'), scheduledArrival: at('08:30') }],

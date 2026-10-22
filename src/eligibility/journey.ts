@@ -30,6 +30,10 @@ export interface Leg {
   /** Intended (booked) scheduled times, minutes since midnight. */
   readonly scheduledDeparture: number;
   readonly scheduledArrival: number;
+  /** Earliest the customer could board this leg, when a gateline tap at its
+   *  origin proves it (e.g. tapping back in after a break of journey). The
+   *  engine will not board an earlier service however good it looks. */
+  readonly readyNotBefore?: number;
 }
 
 /** One actual run of a service on the day, as observed via HSP. */

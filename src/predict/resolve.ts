@@ -81,8 +81,12 @@ export function resolveItinerary(
       if (!boardable(run)) return false;
       if (i === 0) {
         if (entryTime !== null && run.actualDeparture! < entryTime) return false;
-      } else if (run.actualDeparture! <= previousArrival! + interchangeMinutes) {
-        return false;
+      } else {
+        // An entry tap at this leg's origin (tapped back in after a break of
+        // journey) means the customer could not have boarded before it.
+        const tapFloor =
+          constraints.entry && constraints.entry.crs === leg.originCrs ? constraints.entry.timeMinutes : -Infinity;
+        if (run.actualDeparture! <= Math.max(previousArrival! + interchangeMinutes, tapFloor)) return false;
       }
       if (isLast && exitTime !== null && run.actualArrival! > exitTime) return false;
       return true;
