@@ -402,6 +402,32 @@ test('Engine path (structured, unpinned) floors the onward leg at a tap-in too',
   assert.equal(v.band, '15-29');
 });
 
+// A change point inserted from the timetable is a guess: even with a matched
+// entry tap and a tight exit (which alone would be CONFIRMED), the verdict
+// must be INFERRED and say why.
+test('An inserted change caps confidence at INFERRED and is narrated', () => {
+  const t = ticket({ utn: 'SPLIT', ftot: 'SDR', kind: 'walk-up', fareType: 'return', pricePence: 2000 });
+  const itin: PlannedItinerary = {
+    legs: [leg('TBW', 'PDW', '17:50', '18:15'), leg('PDW', 'SOO', '18:30', '19:10')],
+    candidatesByLeg: [[run('a', '17:50', '18:15', '17:50', '18:15')], [run('b', '18:30', '19:10', '18:30', '19:10')]],
+    inferredChangeAt: 'PDW',
+    notes: ['No direct TBW->SOO service after 17:48; inserted a change at PDW from the timetable.'],
+  };
+  const constraints: JourneyConstraints = {
+    coupon: 'Return',
+    entry: { crs: 'TBW', timeMinutes: at('17:48') },
+    exit: { crs: 'SOO', timeMinutes: at('19:12') },
+    onTrain: [], reasonCodes: [], anomalies: [],
+  };
+  const v = assessCoupon({
+    ticket: t, coupon: 'Return', fromCrs: 'TBW', toCrs: 'SOO', constraints,
+    itineraries: [itin], bookedLegs: null,
+  });
+  assert.equal(v.confidence, 'INFERRED');
+  assert.equal(v.delayMinutes, 0);
+  assert.ok(v.explanation.some((l) => l.includes('inserted a change at PDW')));
+});
+
 // -------------------------------- Clip pinning reports the ridden service's own delay
 // Two services: the clipped 17:00 (arr 18:25, 30 late) that the customer was on,
 // and an on-time 17:30 (arr 18:22). Best-achievable mixes the on-time actual

@@ -11,6 +11,8 @@ import type Database from 'better-sqlite3';
 import type { HspClient, Days } from '../hsp/client.js';
 import type { ServiceRun } from '../eligibility/journey.js';
 import {
+  formatMinutes,
+  oneChangeJourney,
   originServiceTermini,
   parseHHMM,
   scheduledJourneysBetween,
@@ -271,6 +273,8 @@ export class BatchDataProvider {
     const legs: IntendedLeg[] = [];
     const candidatesByLeg: ServiceRun[][] = [];
     const rideable = (r: ServiceRun): boolean => !r.cancelled && r.actualDeparture !== null && r.actualArrival !== null;
+    let inferredChangeAt: string | undefined;
+    const notes: string[] = [];
 
     for (let i = 0; i < structure.length; i++) {
       const { originCrs, destinationCrs } = structure[i]!;
@@ -278,9 +282,13 @@ export class BatchDataProvider {
       const exitHere = exit && exit.crs === destinationCrs ? exit.timeMinutes : null;
       let runs: ServiceRun[];
       let intended: ServiceRun | undefined;
+      // The departure floor this leg was searched from, when it had one; a
+      // leg anchored on a clip or an exit tap has no such floor.
+      let anchor: number | null = null;
 
       if (entry && entry.crs === originCrs) {
         const from = entry.timeMinutes;
+        anchor = from;
         runs = await this.legActuals(originCrs, destinationCrs, from - 15, Math.max(from + 180, exitHere ?? 0));
         intended = runs.find((r) => r.scheduledDeparture >= from);
       } else if (i === 0) {
@@ -298,12 +306,52 @@ export class BatchDataProvider {
           return failed;
         }
       } else {
-        const from = legs[i - 1]!.scheduledArrival + INTERCHANGE;
+        // Previous leg = the last one built, which may be the second half of an
+        // inserted change, so index by legs, not by the structure position.
+        const from = legs[legs.length - 1]!.scheduledArrival + INTERCHANGE;
+        anchor = from;
         runs = await this.legActuals(originCrs, destinationCrs, from - 15, Math.max(from + 180, exitHere ?? 0));
         intended = runs.find((r) => r.scheduledDeparture >= from);
       }
 
-      if (!intended) return failed;
+      if (!intended) {
+        // No direct service after the anchor. A leg that is a through service
+        // at one time of day may need a change at another: find one from the
+        // timetable, bounded, and carry on from its second half.
+        const split =
+          anchor !== null ? oneChangeJourney(this.db, originCrs, destinationCrs, this.date, anchor, INTERCHANGE) : null;
+        if (!split) return failed;
+        const first: IntendedLeg = {
+          originCrs,
+          destinationCrs: split.changeAt,
+          scheduledDeparture: split.first.scheduledDeparture,
+          scheduledArrival: split.first.scheduledArrival,
+        };
+        const second: IntendedLeg = {
+          originCrs: split.changeAt,
+          destinationCrs,
+          scheduledDeparture: split.second.scheduledDeparture,
+          scheduledArrival: split.second.scheduledArrival,
+        };
+        legs.push(first, second);
+        candidatesByLeg.push(
+          await this.legActuals(first.originCrs, first.destinationCrs, first.scheduledDeparture - 20, first.scheduledDeparture + 90),
+          await this.legActuals(
+            second.originCrs,
+            second.destinationCrs,
+            second.scheduledDeparture - 20,
+            Math.max(second.scheduledDeparture + 90, exitHere ?? 0),
+          ),
+        );
+        inferredChangeAt = split.changeAt;
+        notes.push(
+          `No direct ${originCrs}->${destinationCrs} service after ${formatMinutes(anchor)}; inserted a change at ` +
+            `${split.changeAt} from the timetable (${formatMinutes(first.scheduledDeparture)} ${originCrs}->${split.changeAt} ` +
+            `${formatMinutes(first.scheduledArrival)}, then ${formatMinutes(second.scheduledDeparture)} ->${destinationCrs} ` +
+            `${formatMinutes(second.scheduledArrival)}). The change point is a guess, so this is INFERRED.`,
+        );
+        continue;
+      }
       legs.push({
         originCrs,
         destinationCrs,
@@ -312,7 +360,10 @@ export class BatchDataProvider {
       });
       candidatesByLeg.push(runs);
     }
-    return { itinerary: { legs, candidatesByLeg }, failedLeg: null };
+    return {
+      itinerary: { legs, candidatesByLeg, ...(inferredChangeAt ? { inferredChangeAt, notes } : {}) },
+      failedLeg: null,
+    };
   }
 
   /** Builds the booked itinerary for an Advance ticket (inferred if needed). */

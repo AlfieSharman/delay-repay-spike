@@ -201,7 +201,13 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
   return. With no return itinerary supplied, the outward itinerary *reversed*
   is used as the leg structure and the times are discovered from HSP anchored
   on the return's scans (`structuredItinerary`); one-change walk-up discovery
-  cannot find a 2+ change journey.
+  cannot find a 2+ change journey. A reversed leg is not guaranteed to still be
+  direct (Tonbridge -> Strood is a through service in the morning, not the
+  evening): when a leg has no direct service after its anchor,
+  `oneChangeJourney` (timetable layer) inserts a single change found from the
+  CIF, bounded (first 6 departures, credible total duration), with arrivals
+  normalised past midnight so an 00:27 arrival never ranks "earliest". A
+  guessed change point caps the verdict at INFERRED and is narrated.
 - **Destination-only multi-leg journeys are the hard case.** With just an exit
   tap the planner anchors on it and works backwards to find the interchange and
   first leg; the intended baseline is the earliest scheduled onward connection.

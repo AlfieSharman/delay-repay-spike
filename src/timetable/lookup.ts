@@ -266,6 +266,123 @@ export function geographicalPath(
     .sort((a, b) => a.scheduledDeparture - b.scheduledDeparture);
 }
 
+/** A scheduled journey with exactly one change, found from the timetable. */
+export interface OneChangeJourney {
+  readonly changeAt: string;
+  readonly first: { readonly scheduledDeparture: number; readonly scheduledArrival: number };
+  readonly second: { readonly scheduledDeparture: number; readonly scheduledArrival: number };
+}
+
+const ONE_CHANGE_MAX_SERVICES = 6;
+/** An inserted-change journey longer than this (from `depFrom` to arrival) is
+ *  not a credible reconstruction and is rejected rather than reported. */
+const ONE_CHANGE_MAX_DURATION = 300;
+
+/** Arrival on the same clock as its departure: +1440 when it wrapped past
+ *  midnight, so an 00:27 arrival never ranks "earlier" than 19:10. */
+function arrivalAfter(departure: number, arrival: number): number {
+  return arrival < departure ? arrival + 1440 : arrival;
+}
+
+/**
+ * The earliest-arriving scheduled journey from origin to destination with
+ * exactly one change, departing the origin at or after `depFrom`. The first
+ * ONE_CHANGE_MAX_SERVICES origin departures in the window are tried, and each
+ * station one then calls at is tried as the change point against the direct
+ * services from there. Bounded and heuristic: it finds *a* plausible
+ * single-change path from the timetable, not the customer's actual one, so a
+ * verdict built on it should be INFERRED. Used when a leg expected to be
+ * direct has no direct service at that time of day (Tonbridge -> Strood is a
+ * through service in the morning but not in the evening).
+ */
+export function oneChangeJourney(
+  db: Database.Database,
+  originCrs: string,
+  destCrs: string,
+  date: string,
+  depFrom: number,
+  interchangeMinutes: number,
+  windowMin = 180,
+): OneChangeJourney | null {
+  const originTiplocs = tiplocsForCrs(db, originCrs);
+  if (originTiplocs.length === 0) return null;
+  const placeholders = originTiplocs.map(() => '?').join(',');
+
+  interface Row extends ScheduleRow {
+    readonly origin_seq: number;
+    readonly origin_departure: number;
+  }
+
+  const rows = db
+    .prepare(
+      `
+      SELECT sc.id, sc.uid, sc.stp_indicator, sc.date_from, sc.date_to, sc.days_run, sc.category, sc.retail_train_id,
+             o.seq AS origin_seq, o.scheduled_departure AS origin_departure
+      FROM schedules sc
+      JOIN calling_points o ON o.schedule_id = sc.id
+        AND o.tiploc IN (${placeholders}) AND o.scheduled_departure IS NOT NULL
+        AND o.scheduled_departure BETWEEN ? AND ?
+    `,
+    )
+    .all(...originTiplocs, depFrom, depFrom + windowMin) as Row[];
+
+  const services = resolveActive(rows.filter((r) => isActiveOnDate(r, date)))
+    .sort((a, b) => a.origin_departure - b.origin_departure)
+    .slice(0, ONE_CHANGE_MAX_SERVICES);
+
+  const stopsStmt = db.prepare(
+    `
+    SELECT st.crs AS crs, cp.scheduled_arrival AS arrival
+    FROM calling_points cp
+    JOIN stations st ON st.tiploc = cp.tiploc
+    WHERE cp.schedule_id = ? AND cp.seq > ? AND cp.scheduled_arrival IS NOT NULL AND st.crs IS NOT NULL
+    ORDER BY cp.seq
+  `,
+  );
+
+  const onwardByCrs = new Map<string, ScheduledJourney[]>();
+  let best: OneChangeJourney | null = null;
+  let bestArrival = Number.POSITIVE_INFINITY;
+
+  for (const svc of services) {
+    const stops = stopsStmt.all(svc.id, svc.origin_seq) as { crs: string; arrival: number }[];
+    for (const stop of stops) {
+      if (stop.crs === originCrs || stop.crs === destCrs) continue;
+      const changeArrival = arrivalAfter(svc.origin_departure, stop.arrival);
+      let onward = onwardByCrs.get(stop.crs);
+      if (!onward) {
+        onward = scheduledJourneysBetween(db, stop.crs, destCrs, date);
+        onwardByCrs.set(stop.crs, onward);
+      }
+      const ready = changeArrival + interchangeMinutes;
+      // Earliest-arriving connection the customer could make (on a normalised
+      // clock, so a past-midnight arrival is not "earliest"), not just the
+      // first to leave.
+      let connection: ScheduledJourney | null = null;
+      let connectionArrival = Number.POSITIVE_INFINITY;
+      for (const j of onward) {
+        if (j.scheduledDeparture < ready) continue;
+        const arr = arrivalAfter(j.scheduledDeparture, j.scheduledArrival);
+        if (arr < connectionArrival) {
+          connection = j;
+          connectionArrival = arr;
+        }
+      }
+      if (!connection) continue;
+      if (connectionArrival - depFrom > ONE_CHANGE_MAX_DURATION) continue;
+      if (connectionArrival < bestArrival) {
+        bestArrival = connectionArrival;
+        best = {
+          changeAt: stop.crs,
+          first: { scheduledDeparture: svc.origin_departure, scheduledArrival: stop.arrival },
+          second: { scheduledDeparture: connection.scheduledDeparture, scheduledArrival: connection.scheduledArrival },
+        };
+      }
+    }
+  }
+  return best;
+}
+
 /** A service leaving one station, with where it terminates. */
 export interface OriginService {
   readonly uid: string;

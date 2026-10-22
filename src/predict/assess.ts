@@ -447,6 +447,9 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
     // Never claim high confidence when a scan points the wrong way.
     if (confidence === 'CONFIRMED') confidence = 'PROBABLE';
   }
+  // A change point guessed from the timetable (no direct service existed) is
+  // a heuristic, whatever the taps say about the ends.
+  if (itinerary.inferredChangeAt) confidence = 'INFERRED';
 
   let delayMinutes = eligibility.delayMinutes;
   let band = eligibility.band;
@@ -513,6 +516,7 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
   const explanation = [
     `Predicted journey (${coupon}):`,
     ...predictedLegs.map((l) => `  ${describeLeg(l)}`),
+    ...(itinerary.notes ?? []),
     ...result.notes,
     ...eligibility.explanation,
     ...disruptionNotes,

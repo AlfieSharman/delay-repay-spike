@@ -96,6 +96,12 @@ export interface PlannedItinerary {
   readonly legs: readonly IntendedLeg[];
   /** Actual service runs on each leg's flow, aligned by index with `legs`. */
   readonly candidatesByLeg: readonly (readonly ServiceRun[])[];
+  /** Set when a leg expected to be direct had no direct service and a change
+   *  was inserted from the timetable (the CRS of the change). A guessed
+   *  change point, so any verdict on it is INFERRED. */
+  readonly inferredChangeAt?: string;
+  /** Narration for the verdict, e.g. why a change was inserted. */
+  readonly notes?: readonly string[];
 }
 
 export type Confidence = 'CONFIRMED' | 'PROBABLE' | 'INFERRED' | 'UNKNOWN';
