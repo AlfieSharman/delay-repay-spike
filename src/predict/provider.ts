@@ -198,12 +198,24 @@ export class BatchDataProvider {
    * final leg's window extends to the exit tap so a later service taken after
    * a cancellation is included.
    */
-  async itineraryActuals(legs: readonly IntendedLeg[], exitMin: number | null): Promise<PlannedItinerary> {
+  async itineraryActuals(
+    legs: readonly IntendedLeg[],
+    exit: { readonly crs: string; readonly timeMinutes: number } | null,
+  ): Promise<PlannedItinerary> {
     const candidatesByLeg: ServiceRun[][] = [];
+    const last = legs.length - 1;
     for (let i = 0; i < legs.length; i++) {
       const leg = legs[i]!;
-      const isLast = i === legs.length - 1;
-      const toTime = isLast && exitMin !== null ? Math.max(exitMin, leg.scheduledArrival) : leg.scheduledDeparture + 90;
+      let toTime = leg.scheduledDeparture + 90;
+      if (i === last && exit && exit.crs === leg.destinationCrs) {
+        toTime = Math.max(exit.timeMinutes, leg.scheduledArrival);
+      } else if (i > 0 && exit && exit.crs === legs[i - 1]!.destinationCrs) {
+        // An exit tap at the previous leg's destination is the interchange
+        // arrival. If it is late the planned onward service may already have
+        // gone and the next one can be hours later (a 2h gap to Honiton), so
+        // fetch well past the tap or the catchable service is never a candidate.
+        toTime = Math.max(toTime, exit.timeMinutes + 240);
+      }
       candidatesByLeg.push(await this.legActuals(leg.originCrs, leg.destinationCrs, leg.scheduledDeparture - 20, toTime));
     }
     return { legs: [...legs], candidatesByLeg };

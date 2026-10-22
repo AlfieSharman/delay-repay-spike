@@ -124,7 +124,7 @@ async function assessTicket(
 
       if (plannedLegs) {
         // Use the customer's planned itinerary: it pins the legs directly.
-        itineraries = [await provider.itineraryActuals(plannedLegs, exitFor(constraints, toCrs))];
+        itineraries = [await provider.itineraryActuals(plannedLegs, constraints.exit ?? null)];
         bookedLegs = meta.kind === 'advance' ? plannedLegs : null;
       } else if (meta.kind === 'advance') {
         // No itinerary supplied: infer the booked service from TimeValidFrom.

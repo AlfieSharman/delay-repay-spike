@@ -324,6 +324,40 @@ test('Walk-up: intended service cancelled, ungated destination, keeps the itiner
   assert.equal(v.band, '15-29');
 });
 
+// Cross-London missed connection. The SE leg's arrival at the change point is
+// blank in HSP, but the customer's exit tap at Waterloo East (15:35) proves
+// they arrived after the planned 15:20 Waterloo -> Honiton had left. The only
+// later Honiton service is the 17:23, arriving 20:37. Delay must be measured on
+// that, against the itinerary's 18:42, not on the planned service they missed.
+// Regression for TRB2VYL3Q3H (was reported as "0 min, not delayed").
+test('Walk-up: exit tap at the interchange chains the next catchable onward service', () => {
+  const t = ticket({ utn: 'XLON', ftot: 'SVR', kind: 'walk-up', fareType: 'return', pricePence: 9140 });
+  const itin: PlannedItinerary = {
+    legs: [leg('HGS', 'WAE', '13:30', '14:59'), leg('WAT', 'HON', '15:20', '18:42')],
+    candidatesByLeg: [
+      [run('se', '13:30', '14:59', '13:35', null)], // WAE arrival blank in HSP
+      [
+        run('planned', '15:20', '18:42', '15:20', '18:41'), // left before the 15:35 tap
+        run('next', '17:23', '20:34', '17:22', '20:37'), // the only later Honiton service
+      ],
+    ],
+  };
+  const constraints: JourneyConstraints = {
+    coupon: 'Outward',
+    entry: { crs: 'HGS', timeMinutes: at('13:16') },
+    exit: { crs: 'WAE', timeMinutes: at('15:35') }, // tapped out at the change point
+    onTrain: [], reasonCodes: [], anomalies: [],
+  };
+  const v = assessCoupon({
+    ticket: t, coupon: 'Outward', fromCrs: 'HGS', toCrs: 'HON', constraints,
+    itineraries: [itin], bookedLegs: null, itineraryPinned: true,
+  });
+  assert.equal(v.entitled, true);
+  assert.equal(v.delayMinutes, 115); // 20:37 vs 18:42, not 0 vs the missed 15:20
+  assert.equal(v.band, '60-119');
+  assert.equal(v.confidence, 'INFERRED');
+});
+
 // -------------------------------- Clip pinning reports the ridden service's own delay
 // Two services: the clipped 17:00 (arr 18:25, 30 late) that the customer was on,
 // and an on-time 17:30 (arr 18:22). Best-achievable mixes the on-time actual

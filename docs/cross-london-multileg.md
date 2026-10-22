@@ -66,10 +66,20 @@ not the one the customer could actually catch after a disrupted Southeastern leg
 `TRB2VYL3Q3H` is the clearer motivator, because it is an eligible claim the tool
 currently misses entirely.
 
-(Two narrower, non-cross-London relatives of this were fixed in the model
-itself: a cancelled intended service re-basing the delay onto its replacement,
-and a clip on a through service where the destination is an intermediate stop.
-The remaining cross-London case needs the multi-leg reconstruction below.)
+**Fixed (Oct 2026).** When the itinerary is supplied and the customer tapped
+out at the change point, the batch now treats that exit tap as the interchange
+arrival: it fetches onward services well past the tap (the next Honiton train
+was two hours later and previously wasn't even a candidate) and chains the
+earliest service the customer could still board, measuring at the true
+destination against the intended arrival. `TRB2VYL3Q3H` now returns **115 min,
+band 60-119**. One cosmetic limit: HSP has no Waterloo East arrival for the
+13:30 the customer was clipped on, so the first-leg narrative shows the 13:50 as
+"next valid"; the verdict is unaffected because both miss the 15:20.
+
+Two narrower relatives were fixed in the model at the same time: a cancelled
+intended service re-basing the delay onto its replacement, and a clip on a
+through service where the destination is an intermediate stop. What remains
+cross-London is reconstruction **without** a supplied itinerary, below.
 
 ## What is already in place
 
@@ -97,7 +107,7 @@ So the remaining work is wiring and robustness, not building from scratch.
 | --- | --- | --- |
 | Destination resolution | Infer the true terminal: return-origin scan -> outward destination; prefer a destination gate scan; else the itinerary. Returns resolve cleanly; a **single** with an ungated destination can't be pinned without an explicit itinerary. | ~0.5-1 day |
 | Interchange detection | Treat exit-then-reentry at the same station as a change; use the interchange arrival from the scans. | ~0.5 day |
-| Multi-leg assembly + delay | Build board->interchange->destination, fetch actuals per leg, chain, measure at the true destination against the intended arrival. | ~1-2 days |
+| Multi-leg assembly + delay | **Done when the itinerary is supplied** (interchange exit tap -> chain the next catchable onward service, measure at the true destination). Remaining: the same chaining when the legs have to be discovered rather than pinned. | ~1 day |
 | Validation | Test against a set of real cross-London claims (and Odyssey where available). | ~1 day |
 
 Estimates are **soft** - multi-leg reconstruction is edge-case-heavy (which
@@ -139,6 +149,6 @@ The deciding factor is **how much cross-London volume is expected**:
 
 Either way it is **days, not weeks**, because the engine, the loaded timetable
 and the required signals are all in place. Defer the build until the volume is
-known; in the meantime the tool correctly assesses the SE portion and the
-loaded timetable already lets the full journey be inspected by hand
+known; in the meantime the tool assesses the full journey correctly whenever
+the itinerary is supplied, and the loaded timetable lets it be inspected by hand
 (`npm run check -- <o> <d> <date> <dep> --via <interchange>`).

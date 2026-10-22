@@ -87,12 +87,19 @@ function unresolvedVerdict(
 }
 
 /**
- * Walk-up fallback verdict when the journey can't be established from the ticket
- * origin but the customer's itinerary is known. Delay is measured against the
- * itinerary's intended arrival. The actual arrival is the itinerary service's
- * own arrival when it ran ("assume they travelled the itinerary", and it is the
- * train arrival, consistent with the engine); otherwise the exit tap. Heuristic,
- * so INFERRED.
+ * Walk-up fallback verdict when the journey can't be established cleanly from
+ * the scans but the customer's itinerary is known. Delay is measured against
+ * the itinerary's intended arrival. The actual arrival is, in order:
+ *  - if there is an exit tap at an intermediate leg's destination (the customer
+ *    tapped out at the change point, e.g. Waterloo East to walk to Waterloo),
+ *    the arrival of the onward legs chained from that tap, taking the earliest
+ *    service they could still board on each. If the planned onward service had
+ *    already left, this naturally picks the next one, which cross-London can be
+ *    hours later. This is the missed-connection case;
+ *  - else the itinerary service's own arrival when it ran ("assume they
+ *    travelled the itinerary", consistent with the engine);
+ *  - else the exit tap at the destination.
+ * Heuristic, so INFERRED.
  */
 function itineraryFallbackVerdict(
   coupon: CouponType,
@@ -101,16 +108,57 @@ function itineraryFallbackVerdict(
   itinerary: PlannedItinerary | undefined,
   toCrs: string,
   threshold: number,
+  interchange: number,
 ): CouponVerdict | null {
   if (!itinerary || itinerary.legs.length === 0) return null;
   const legs = itinerary.legs;
-  const lastLeg = legs[legs.length - 1]!;
-  const itineraryArrival = lastLeg.scheduledArrival;
+  const last = legs.length - 1;
+  const itineraryArrival = legs[last]!.scheduledArrival;
+  const exit = constraints.exit ?? null;
 
-  const exitAtDest = constraints.exit && constraints.exit.crs === toCrs ? constraints.exit.timeMinutes : null;
-  const itinService = findBookedRun(itinerary.candidatesByLeg[legs.length - 1] ?? [], lastLeg);
-  const ranItinService = !!itinService && !itinService.cancelled && itinService.actualArrival !== null;
-  const actualArrival = ranItinService ? itinService!.actualArrival! : exitAtDest;
+  // An exit tap at an intermediate leg's destination is a hard arrival time at
+  // the change point.
+  const interchangeIdx = exit ? legs.findIndex((l, i) => i < last && l.destinationCrs === exit.crs) : -1;
+
+  const chosen: (ServiceRun | null)[] = legs.map(() => null);
+  const notes: string[] = [];
+  let actualArrival: number | null;
+  let source: string;
+
+  if (interchangeIdx >= 0 && exit) {
+    let ready = exit.timeMinutes + interchange;
+    for (let i = interchangeIdx + 1; i <= last; i++) {
+      const leg = legs[i]!;
+      const runs = itinerary.candidatesByLeg[i] ?? [];
+      const boardable = runs.filter(
+        (r) => !r.cancelled && r.actualDeparture !== null && r.actualArrival !== null && r.actualDeparture > ready,
+      );
+      if (boardable.length === 0) return null;
+      const next = boardable.reduce((best, r) => (r.actualArrival! < best.actualArrival! ? r : best));
+      const planned = findBookedRun(runs, leg);
+      if (planned && planned !== next) {
+        const gone = planned.actualDeparture !== null && planned.actualDeparture <= ready;
+        notes.push(
+          `${leg.originCrs}->${leg.destinationCrs}: planned ${formatMinutes(leg.scheduledDeparture)} service ` +
+            (gone
+              ? `had departed (${formatMinutes(planned.actualDeparture!)}) before the customer was ready (${formatMinutes(ready)})`
+              : 'was not catchable') +
+            `; next catchable ${formatMinutes(next.scheduledDeparture)} departed ${formatMinutes(next.actualDeparture!)}, ` +
+            `arrived ${leg.destinationCrs} ${formatMinutes(next.actualArrival!)}.`,
+        );
+      }
+      chosen[i] = next;
+      ready = next.actualArrival! + interchange;
+    }
+    actualArrival = chosen[last]!.actualArrival;
+    source = `exit tap at ${exit.crs} ${formatMinutes(exit.timeMinutes)}, then the next catchable onward service`;
+  } else {
+    const exitAtDest = exit && exit.crs === toCrs ? exit.timeMinutes : null;
+    const itinService = findBookedRun(itinerary.candidatesByLeg[last] ?? [], legs[last]!);
+    const ranItinService = !!itinService && !itinService.cancelled && itinService.actualArrival !== null;
+    actualArrival = ranItinService ? itinService!.actualArrival! : exitAtDest;
+    source = ranItinService ? 'itinerary service actual arrival' : 'exit tap';
+  }
   if (actualArrival === null) return null;
 
   const delayMinutes = Math.max(0, actualArrival - itineraryArrival);
@@ -118,18 +166,34 @@ function itineraryFallbackVerdict(
   const eligible = delayMinutes >= threshold;
   const compensation = eligible ? compensationPence(band, ticket.fareType, ticket.pricePence) : 0;
 
-  const predictedLegs: PredictedLeg[] = legs.map((l, i) => ({
-    originCrs: l.originCrs,
-    destinationCrs: l.destinationCrs,
-    scheduledDeparture: l.scheduledDeparture,
-    scheduledArrival: l.scheduledArrival,
-    actualDeparture: null,
-    actualArrival: i === legs.length - 1 ? actualArrival : null,
-    cancelled: false,
-    callingPoints: [l.originCrs, l.destinationCrs],
-  }));
+  const predictedLegs: PredictedLeg[] = legs.map((l, i) => {
+    const r = chosen[i];
+    if (r) {
+      return {
+        originCrs: l.originCrs,
+        destinationCrs: l.destinationCrs,
+        scheduledDeparture: r.scheduledDeparture,
+        scheduledArrival: r.scheduledArrival,
+        actualDeparture: r.actualDeparture,
+        actualArrival: r.actualArrival,
+        cancelled: false,
+        callingPoints: r.callingPoints ?? [l.originCrs, l.destinationCrs],
+        toc: r.toc,
+      };
+    }
+    return {
+      originCrs: l.originCrs,
+      destinationCrs: l.destinationCrs,
+      scheduledDeparture: l.scheduledDeparture,
+      scheduledArrival: l.scheduledArrival,
+      actualDeparture: null,
+      // The interchange leg's arrival is evidenced by the exit tap itself.
+      actualArrival: i === interchangeIdx ? exit!.timeMinutes : i === last ? actualArrival : null,
+      cancelled: false,
+      callingPoints: [l.originCrs, l.destinationCrs],
+    };
+  });
 
-  const source = ranItinService ? 'itinerary service actual arrival' : 'exit tap';
   return {
     coupon,
     entitled: eligible,
@@ -141,7 +205,8 @@ function itineraryFallbackVerdict(
     compensationPence: eligible ? compensation : null,
     anomalies: [...constraints.anomalies],
     explanation: [
-      `Could not reconstruct a clean journey from ${legs[0]!.originCrs} (scans don't establish travel from the ticket origin).`,
+      `Could not reconstruct a clean journey from ${legs[0]!.originCrs} from the scans and HSP actuals.`,
+      ...notes,
       `Fell back to the itinerary: intended arrival ${formatMinutes(itineraryArrival)}, actual arrival ` +
         `${formatMinutes(actualArrival)} (${source}) = ${delayMinutes} min late (threshold ${threshold}).`,
     ],
@@ -282,7 +347,7 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
   // rule and never take this path.
   const entryAtOrigin = !!(constraints.entry && constraints.entry.crs === fromCrs);
   if (ticket.kind !== 'advance' && input.itineraryPinned && (!resolved || !entryAtOrigin)) {
-    const fallback = itineraryFallbackVerdict(coupon, ticket, constraints, input.itineraries[0], toCrs, threshold);
+    const fallback = itineraryFallbackVerdict(coupon, ticket, constraints, input.itineraries[0], toCrs, threshold, interchange);
     if (fallback) return fallback;
   }
   if (!resolved) {
