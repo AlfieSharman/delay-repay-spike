@@ -208,6 +208,40 @@ forward, so it needs to be clean and easy to pick up, not necessarily complete.
   CIF, bounded (first 6 departures, credible total duration), with arrivals
   normalised past midnight so an 00:27 arrival never ranks "earliest". A
   guessed change point caps the verdict at INFERRED and is narrated.
+- **Cross-London with no itinerary is reconstructed from the taps.** Every
+  gateline tap is kept in order (`JourneyConstraints.taps`); a tap-out at a
+  station that is not the destination is a change, and `segmentsFromTaps`
+  splits the journey there, with a following tap-in as the onward origin. With
+  no tap-in (out at Waterloo East, onward from Waterloo) the onward origin is
+  the tap-out station's fare-group mate whose onward service arrives first,
+  probed via **HSP, not the loaded timetable**, because the onward leg is
+  often another operator's that the CIF filter doesn't hold. A tap-in is a
+  hard floor on its leg; a tap-out is not (a walk-up is judged on the train's
+  actual arrival, not on when they ambled through the gate), it only extends
+  the HSP window and stands in for a blank arrival.
+- **Three guards on discovered (unpinned) journeys.** Discovery starts where
+  the customer tapped in, not at the ticket origin, when those differ. Clip
+  pinning from the through-service pool does not wait on the itinerary
+  resolving (the clip identifies the service by itself). And a discovered
+  itinerary the engine cannot complete is returned UNRESOLVED, never awarded
+  the 120+ band: for a known itinerary that outcome means every onward option
+  was cancelled, for a guessed one it almost always means the guess was wrong.
+- **Resolution asks what happened; the engine asks what was achievable. Keep
+  them straight.** The resolver accepts a connection if the onward train had
+  not left before the customer arrived (physical feasibility, corroborated by
+  taps and clips); the 5-minute interchange and strict "ready before
+  departure" rule belong to the engine's best-achievable chain and the Advance
+  booked-connection check, not to resolution (applied there it rejected a
+  connection the exit tap proved was made). And best-achievable can never be
+  *later* than what demonstrably happened: when the exit tap corroborates the
+  resolved journey's final arrival and it beats the engine's chain, the
+  evidenced arrival wins. That only ever lowers a delay.
+- **An Advance with no itinerary on a multi-leg journey** cannot be inferred
+  as a single direct booked service. The batch discovers the legs the way a
+  walk-up would, anchored on the booked departure, and treats them as the
+  booked itinerary. Walk-up discovery itself works forwards from an entry tap
+  (the next origin service after tapping in) and only works backwards from
+  the exit when there is no entry tap.
 - **Destination-only multi-leg journeys are the hard case.** With just an exit
   tap the planner anchors on it and works backwards to find the interchange and
   first leg; the intended baseline is the earliest scheduled onward connection.

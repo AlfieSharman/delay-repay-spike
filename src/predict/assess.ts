@@ -14,7 +14,7 @@ import { bandForDelay } from '../eligibility/journey.js';
 import type { Journey, Leg, ServiceRun } from '../eligibility/journey.js';
 import { formatMinutes } from '../timetable/lookup.js';
 import { compensationPence } from './compensation.js';
-import { resolveBest } from './resolve.js';
+import { entryTapAt, resolveBest } from './resolve.js';
 import type { RestrictionDefinition } from './restrictions.js';
 import type { RouteDefinition } from './routes.js';
 import { assessValidity } from './validity.js';
@@ -132,9 +132,8 @@ function itineraryFallbackVerdict(
       const runs = itinerary.candidatesByLeg[i] ?? [];
       // An entry tap at this leg's origin (tapped back in after a break of
       // journey) floors when they could board it.
-      if (constraints.entry && constraints.entry.crs === leg.originCrs) {
-        ready = Math.max(ready, constraints.entry.timeMinutes);
-      }
+      const tapIn = entryTapAt(constraints, leg.originCrs);
+      if (tapIn !== null) ready = Math.max(ready, tapIn);
       const boardable = runs.filter(
         (r) => !r.cancelled && r.actualDeparture !== null && r.actualArrival !== null && r.actualDeparture > ready,
       );
@@ -338,8 +337,12 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
   // Level 2 (clipped): an accepted clip identifies the exact service travelled,
   // so measure that service's own delay - more accurate than any tap-based
   // inference. Advance (level 1) is handled below; this is for walk-up.
-  if (resolved && ticket.kind !== 'advance') {
-    const clipVerdict = clipPinnedVerdict(coupon, ticket, constraints, resolved.itinerary, toCrs, threshold, input.clipServices ?? []);
+  // The through-service pool (clipServices) identifies the service from the
+  // clip alone, so it must not wait on the itinerary resolving.
+  const clipPool = input.clipServices ?? [];
+  const clipBase = resolved?.itinerary ?? input.itineraries[0];
+  if (ticket.kind !== 'advance' && clipBase && (resolved || clipPool.length > 0)) {
+    const clipVerdict = clipPinnedVerdict(coupon, ticket, constraints, clipBase, toCrs, threshold, clipPool);
     if (clipVerdict) return clipVerdict;
   }
 
@@ -401,17 +404,18 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
             predictedLegs[predictedLegs.length - 1]!.scheduledArrival
           : itineraryArrival;
 
-    const legs: Leg[] = itinerary.legs.map((l, i) => ({
-      origin: l.originCrs,
-      destination: l.destinationCrs,
-      scheduledDeparture: i === 0 ? ready : l.scheduledDeparture,
-      scheduledArrival: i === itinerary.legs.length - 1 ? intendedArrival : l.scheduledArrival,
+    const legs: Leg[] = itinerary.legs.map((l, i) => {
       // An entry tap at a later leg's origin (tapped back in after a break of
       // journey) floors when the customer could board that leg.
-      ...(i > 0 && constraints.entry && constraints.entry.crs === l.originCrs
-        ? { readyNotBefore: constraints.entry.timeMinutes }
-        : {}),
-    }));
+      const tapIn = i > 0 ? entryTapAt(constraints, l.originCrs) : null;
+      return {
+        origin: l.originCrs,
+        destination: l.destinationCrs,
+        scheduledDeparture: i === 0 ? ready : l.scheduledDeparture,
+        scheduledArrival: i === itinerary.legs.length - 1 ? intendedArrival : l.scheduledArrival,
+        ...(tapIn !== null ? { readyNotBefore: tapIn } : {}),
+      };
+    });
     journey = {
       legs,
       ticketKind: 'flexible',
@@ -423,6 +427,20 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
   }
 
   const eligibility = assessEligibility(journey, itinerary.candidatesByLeg);
+
+  // "Journey could not be completed" earns the top band only for a known
+  // itinerary (every onward option genuinely gone). For one we discovered
+  // ourselves it far more likely means the guess was wrong, so never award on it.
+  if (!Number.isFinite(eligibility.delayMinutes) && !input.itineraryPinned && ticket.kind !== 'advance') {
+    return {
+      ...unresolvedVerdict(coupon, constraints, 'SERVICE_UNRESOLVED'),
+      explanation: [
+        'The discovered itinerary could not be completed from the actual services, so it was probably not the journey made.',
+        ...eligibility.explanation,
+      ],
+    };
+  }
+
   const validity = assessValidity(
     ticket,
     constraints,
@@ -454,6 +472,27 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
   let delayMinutes = eligibility.delayMinutes;
   let band = eligibility.band;
   let eligible = eligibility.eligible;
+
+  // Best-achievable can never be later than what demonstrably happened. When
+  // the exit tap corroborates the resolved journey's final arrival and that
+  // beats the engine's chain (a connection the planning rule calls missed by
+  // a minute, but the taps show was made), the evidenced arrival wins. This
+  // only ever lowers a delay, so it cannot invent an approval.
+  const evidenceNotes: string[] = [];
+  const evidencedArrival = result.signals.exitTight ? predictedLegs[predictedLegs.length - 1]!.actualArrival : null;
+  if (evidencedArrival !== null && journey.ticketKind === 'flexible' && Number.isFinite(delayMinutes)) {
+    const intended = journey.legs[journey.legs.length - 1]!.scheduledArrival;
+    const evidencedDelay = Math.max(0, evidencedArrival - intended);
+    if (evidencedDelay < delayMinutes) {
+      evidenceNotes.push(
+        `The exit tap corroborates an arrival at ${formatMinutes(evidencedArrival)} on the resolved journey, earlier than the ` +
+          `engine's best-achievable chain (${formatMinutes(intended + delayMinutes)}); using the evidenced arrival.`,
+      );
+      delayMinutes = evidencedDelay;
+      band = bandForDelay(delayMinutes)?.label ?? null;
+      eligible = delayMinutes >= threshold;
+    }
+  }
 
   // Advance disruption: the booked itinerary service was cancelled, or ran late
   // enough (or didn't run) that the customer couldn't travel it as booked, so
@@ -519,6 +558,7 @@ export function assessCoupon(input: AssessCouponInput): CouponVerdict {
     ...(itinerary.notes ?? []),
     ...result.notes,
     ...eligibility.explanation,
+    ...evidenceNotes,
     ...disruptionNotes,
     ...validity.anomalies.map((a) => `Validity: ${a}`),
   ];

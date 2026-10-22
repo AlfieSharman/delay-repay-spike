@@ -23,7 +23,7 @@ import { findRteFile, loadRouteDefinitions, type RouteDefinition } from './predi
 import { extractConstraints, groupByCoupon, normaliseScans, type RawScan } from './predict/scans.js';
 import { RouteingGuide } from './routeing/guide.js';
 import type { CouponType, CouponVerdict, IntendedLeg, PlannedItinerary, ScanEvent, TicketInfo } from './predict/types.js';
-import { parseHHMM } from './timetable/lookup.js';
+import { parseHHMM, segmentsFromTaps, type StructureLeg } from './timetable/lookup.js';
 
 const DB_PATH = 'data/spike.db';
 
@@ -143,7 +143,7 @@ async function assessTicket(
     // discovery can't find a 2+ change journey, so this is what makes returns
     // like Tunbridge Wells -> Chatham (three legs) resolvable at all.
     const outwardLegs = coupon === 'Return' && !plannedLegs ? parseItineraryLegs(raw.Itinerary, 'Outward') : null;
-    const structure = outwardLegs
+    let structure: StructureLeg[] | null = outwardLegs
       ? [...outwardLegs].reverse().map((l) => ({ originCrs: l.destinationCrs, destinationCrs: l.originCrs }))
       : null;
 
@@ -164,6 +164,13 @@ async function assessTicket(
       continue;
     }
 
+    // No itinerary at all: a tap-out at a station that is not the destination
+    // means the customer changed there. Segment the journey from the gateline
+    // taps; an onward origin with no tap-in is discovered by structuredItinerary
+    // (the nearby London station the onward service leaves from).
+    const taps = constraints.taps ?? [];
+    if (!plannedLegs && !structure) structure = segmentsFromTaps(fromCrs, toCrs, taps);
+
     // The outward's TimeValidFrom does not constrain the return, and validity
     // date checks (restriction date bands) must use this coupon's travel date.
     const couponTicket: TicketInfo = {
@@ -182,12 +189,14 @@ async function assessTicket(
         itineraries = [await dated.itineraryActuals(plannedLegs, constraints.exit ?? null)];
         bookedLegs = meta.kind === 'advance' ? plannedLegs : null;
       } else if (structure) {
-        const built = await dated.structuredItinerary(structure, constraints.entry ?? null, constraints.exit ?? null, constraints.onTrain);
+        const built = await dated.structuredItinerary(structure, taps, constraints.onTrain);
         itineraries = built.itinerary ? [built.itinerary] : [];
         if (built.failedLeg) {
+          const how = outwardLegs ? 'Reversed the outward itinerary' : 'Segmented the journey from the gateline taps';
           unresolvedWhy =
-            ` Reversed the outward itinerary (${structure.map((l) => l.originCrs).join('>')}>${toCrs}) but found no direct ` +
-            `${built.failedLeg} service after the previous leg; the return probably needed an extra change, which needs journey planning.`;
+            ` ${how} (${structure.map((l) => l.originCrs ?? '?').join('>')}>${toCrs}) but could not complete leg ` +
+            `${built.failedLeg}: no direct service after the previous leg and no single change found, or no station ` +
+            `near the tap-out with an onward service to the destination.`;
         }
       } else if (meta.kind === 'advance') {
         // No itinerary supplied: infer the booked service from TimeValidFrom.
@@ -197,11 +206,26 @@ async function assessTicket(
         const built = await dated.advanceItinerary(fromCrs, toCrs, bookedDeparture);
         itineraries = built.itineraries;
         bookedLegs = built.bookedLegs;
+        // No direct booked service: a multi-leg Advance with no itinerary
+        // supplied. Discover the legs the way a walk-up would, anchored on the
+        // booked departure, and treat them as the booked itinerary (an Advance
+        // is booked on the first journey from that departure).
+        if ((built.itineraries[0]?.candidatesByLeg[0]?.length ?? 0) === 0) {
+          const discovered = await dated.walkUpItineraries(fromCrs, toCrs, bookedDeparture, exitFor(constraints, toCrs));
+          if (discovered.length > 0) {
+            itineraries = discovered;
+            bookedLegs = [...discovered[0]!.legs];
+          }
+        }
       } else {
+        // Boarded downstream of the ticket origin (the entry tap is elsewhere):
+        // the journey to reconstruct starts where they actually tapped in, not
+        // where the ticket is from. Validity is still judged on the ticket.
+        const boardedAt = constraints.entry && constraints.entry.crs !== fromCrs ? constraints.entry.crs : fromCrs;
         itineraries = await dated.walkUpItineraries(
-          fromCrs,
+          boardedAt,
           toCrs,
-          entryFor(constraints, fromCrs),
+          entryFor(constraints, boardedAt),
           exitFor(constraints, toCrs),
         );
       }
@@ -249,7 +273,8 @@ async function main(): Promise<void> {
   const verbose = args.includes('--verbose');
   const recordIdx = args.indexOf('--record');
   const recordDir = recordIdx >= 0 ? args[recordIdx + 1] ?? null : null;
-  const dir = args.find((a, i) => !a.startsWith('--') && i !== recordIdx + 1);
+  const recordValueIdx = recordIdx >= 0 ? recordIdx + 1 : -1;
+  const dir = args.find((a, i) => !a.startsWith('--') && i !== recordValueIdx);
   if (!dir) {
     console.log('Usage: npm run batch -- <dir of ticket JSON files> [--verbose] [--record <fixture dir>]');
     process.exit(1);

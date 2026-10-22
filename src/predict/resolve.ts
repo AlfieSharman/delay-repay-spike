@@ -48,6 +48,22 @@ function toPredictedLeg(originCrs: string, destinationCrs: string, run: ServiceR
 }
 
 /**
+ * The time of an entry tap at `crs`, if the customer tapped in there: the
+ * latest such tap when the full tap list is known (a tap-in after a break of
+ * journey), else the coupon's first entry if it was at `crs`. Null if none.
+ */
+export function entryTapAt(constraints: JourneyConstraints, crs: string): number | null {
+  if (constraints.taps) {
+    for (let i = constraints.taps.length - 1; i >= 0; i--) {
+      const t = constraints.taps[i]!;
+      if (t.mode === 'entry' && t.crs === crs) return t.timeMinutes;
+    }
+    return null;
+  }
+  return constraints.entry && constraints.entry.crs === crs ? constraints.entry.timeMinutes : null;
+}
+
+/**
  * Resolves one candidate itinerary against the scan constraints. Returns null
  * if the itinerary cannot be made to fit (e.g. every onward service on a leg
  * was cancelled). Otherwise returns the chosen services and the confidence
@@ -82,11 +98,15 @@ export function resolveItinerary(
       if (i === 0) {
         if (entryTime !== null && run.actualDeparture! < entryTime) return false;
       } else {
+        // Resolution asks what physically happened, not what a planner would
+        // allow: a connection is feasible if the onward train had not left
+        // before they arrived (the taps and clips then corroborate it). The
+        // interchange minimum is the engine's planning rule, not a filter here;
+        // applied here it rejected a connection the exit tap proved was made.
         // An entry tap at this leg's origin (tapped back in after a break of
-        // journey) means the customer could not have boarded before it.
-        const tapFloor =
-          constraints.entry && constraints.entry.crs === leg.originCrs ? constraints.entry.timeMinutes : -Infinity;
-        if (run.actualDeparture! <= Math.max(previousArrival! + interchangeMinutes, tapFloor)) return false;
+        // journey) still means they could not have boarded before it.
+        const tapFloor = entryTapAt(constraints, leg.originCrs) ?? -Infinity;
+        if (run.actualDeparture! < Math.max(previousArrival!, tapFloor)) return false;
       }
       if (isLast && exitTime !== null && run.actualArrival! > exitTime) return false;
       return true;

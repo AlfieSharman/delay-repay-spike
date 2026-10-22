@@ -7,6 +7,7 @@
 import { lookupReasonCode } from './reason-codes.js';
 import type {
   CouponType,
+  GatelineTap,
   JourneyConstraints,
   OnTrainSighting,
   ScanEvent,
@@ -145,6 +146,7 @@ export function groupByCoupon(scans: readonly ScanEvent[]): Map<CouponType, Scan
 export function extractConstraints(coupon: CouponType, scans: readonly ScanEvent[]): JourneyConstraints {
   let entry: { crs: string; timeMinutes: number } | undefined;
   let exit: { crs: string; timeMinutes: number } | undefined;
+  const taps: GatelineTap[] = [];
   const onTrain: OnTrainSighting[] = [];
   const reasonCodes: string[] = [];
   const anomalies: string[] = [];
@@ -153,6 +155,9 @@ export function extractConstraints(coupon: CouponType, scans: readonly ScanEvent
     if (scan.kind === 'gateline' && scan.stationCrs) {
       if (scan.mode === 'entry' && !entry) entry = { crs: scan.stationCrs, timeMinutes: scan.timeMinutes };
       if (scan.mode === 'exit') exit = { crs: scan.stationCrs, timeMinutes: scan.timeMinutes };
+      if (scan.mode === 'entry' || scan.mode === 'exit') {
+        taps.push({ crs: scan.stationCrs, timeMinutes: scan.timeMinutes, mode: scan.mode });
+      }
     }
     if (scan.kind === 'on-train' && scan.trainInfo) {
       onTrain.push({ info: scan.trainInfo, timeMinutes: scan.timeMinutes, accepted: true });
@@ -171,7 +176,7 @@ export function extractConstraints(coupon: CouponType, scans: readonly ScanEvent
     }
   }
 
-  return { coupon, entry, exit, onTrain, reasonCodes, anomalies };
+  return { coupon, entry, exit, onTrain, reasonCodes, anomalies, taps };
 }
 
 function formatMin(m: number): string {

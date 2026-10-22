@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import Database from 'better-sqlite3';
-import { geographicalPath, oneChangeJourney } from './lookup.js';
+import { crossLondonOnwardOrigin, earliestScheduledArrival, geographicalPath, oneChangeJourney, segmentsFromTaps } from './lookup.js';
 
 function makeDb(): Database.Database {
   const db = new Database(':memory:');
@@ -16,9 +16,57 @@ function makeDb(): Database.Database {
       date_from TEXT, date_to TEXT, days_run TEXT, category TEXT, retail_train_id TEXT);
     CREATE TABLE calling_points (id INTEGER PRIMARY KEY, schedule_id INTEGER, seq INTEGER,
       record_type TEXT, tiploc TEXT, scheduled_arrival INTEGER, scheduled_departure INTEGER, scheduled_pass INTEGER);
+    CREATE TABLE locations (nlc TEXT PRIMARY KEY, crs TEXT, name TEXT, fare_group_nlc TEXT);
   `);
   return db;
 }
+
+// ---------------------------------------------------------------- tap segmentation
+test('segmentsFromTaps splits at an intermediate tap-out; a following tap-in is the onward origin', () => {
+  // Out at Waterloo East with no tap-in: the onward origin is unknown.
+  assert.deepEqual(
+    segmentsFromTaps('HGS', 'HON', [
+      { crs: 'HGS', timeMinutes: 796, mode: 'entry' },
+      { crs: 'WAE', timeMinutes: 935, mode: 'exit' },
+    ]),
+    [{ originCrs: 'HGS', destinationCrs: 'WAE' }, { originCrs: null, destinationCrs: 'HON' }],
+  );
+  // Out at Waterloo, back in at Waterloo East: the onward leg starts there.
+  assert.deepEqual(
+    segmentsFromTaps('HON', 'HGS', [
+      { crs: 'WAT', timeMinutes: 834, mode: 'exit' },
+      { crs: 'WAE', timeMinutes: 1146, mode: 'entry' },
+    ]),
+    [{ originCrs: 'HON', destinationCrs: 'WAT' }, { originCrs: 'WAE', destinationCrs: 'HGS' }],
+  );
+  // Only an exit at the destination: nothing to segment.
+  assert.equal(
+    segmentsFromTaps('CBE', 'FKC', [
+      { crs: 'CBE', timeMinutes: 1030, mode: 'entry' },
+      { crs: 'FKC', timeMinutes: 1115, mode: 'exit' },
+    ]),
+    null,
+  );
+});
+
+// After tapping out at Waterloo East, trains to Honiton leave from Waterloo
+// (same LONDON TERMINALS fare group), so that is the onward origin, with the
+// walk allowed for; Waterloo East itself has no onward service.
+test('crossLondonOnwardOrigin finds the group mate the onward service leaves from', async () => {
+  const db = makeDb();
+  db.exec(`
+    INSERT INTO stations VALUES ('WATRLOE','WAE','Waterloo East'),('WATRLMN','WAT','Waterloo'),('HONITON','HON','Honiton');
+    INSERT INTO locations VALUES ('5158','WAE','LONDON WATRLOO E','1072'),('5598','WAT','LONDON WATERLOO','1072'),
+      ('5717','HON','HONITON','5717');
+    INSERT INTO schedules VALUES (1,'S1','P','2026-08-01','2026-08-31','1111100','XX','SW1');
+    INSERT INTO calling_points VALUES (1,1,0,'LO','WATRLMN',NULL,920,NULL),(2,1,1,'LT','HONITON',1122,NULL,NULL); -- 15:20 -> 18:42
+  `);
+  // The probe here is the loaded timetable; in the batch it is HSP (national).
+  const probe = async (from: string, ready: number) => earliestScheduledArrival(db, from, 'HON', '2026-08-21', ready);
+  assert.deepEqual(await crossLondonOnwardOrigin(db, 'WAE', 899, 5, probe), { originCrs: 'WAT', transfer: 15 });
+  assert.equal(await crossLondonOnwardOrigin(db, 'WAE', 1000, 5, probe), null); // 15:20 already gone by 16:40 + walk
+  db.close();
+});
 
 // The path must include a station the service PASSES (pass-only record) between
 // origin and destination, and drop junctions that have no CRS - this is the

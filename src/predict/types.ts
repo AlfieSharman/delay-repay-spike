@@ -72,11 +72,24 @@ export interface OnTrainSighting {
   readonly accepted: boolean;
 }
 
+/** One gateline tap, for interchange detection and per-leg anchoring. */
+export interface GatelineTap {
+  readonly crs: string;
+  readonly timeMinutes: number;
+  readonly mode: 'entry' | 'exit';
+}
+
 /** Hard constraints a candidate journey must satisfy, from one coupon's scans. */
 export interface JourneyConstraints {
   readonly coupon: CouponType;
+  /** First entry tap and last exit tap (the journey ends). */
   readonly entry?: { readonly crs: string; readonly timeMinutes: number };
   readonly exit?: { readonly crs: string; readonly timeMinutes: number };
+  /** Every gateline tap in time order. A tap-out at a station that is not the
+   *  destination followed by a tap-in is a change of train (cross-London); a
+   *  tap-in after a break of journey floors the onward leg. Optional only so
+   *  hand-built test constraints need not supply it. */
+  readonly taps?: readonly GatelineTap[];
   readonly onTrain: readonly OnTrainSighting[];
   /** Raw reason codes from rejected scans (looked up in reason-codes.ts). */
   readonly reasonCodes: readonly string[];

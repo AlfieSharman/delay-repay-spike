@@ -383,6 +383,121 @@ export function oneChangeJourney(
   return best;
 }
 
+/** Allowance for a walk or tube hop between two different London stations. */
+export const LONDON_TRANSFER = 15;
+
+/** One leg of a journey structure: the origin is null when it still has to be
+ *  discovered (a tap-out with no tap-in: the onward train left from a nearby
+ *  station, e.g. out at Waterloo East, onward from Waterloo). */
+export interface StructureLeg {
+  readonly originCrs: string | null;
+  readonly destinationCrs: string;
+}
+
+/**
+ * Segments a journey at its intermediate tap-outs. A tap-out at a station
+ * that is not the destination means the customer changed there; the next
+ * tap-in, if any, is where the onward leg starts, otherwise its origin is
+ * unknown (null) and must be discovered. Returns null when there is no
+ * intermediate tap-out, i.e. nothing to segment.
+ */
+export function segmentsFromTaps(
+  fromCrs: string,
+  toCrs: string,
+  taps: readonly { readonly crs: string; readonly timeMinutes: number; readonly mode: 'entry' | 'exit' }[],
+): StructureLeg[] | null {
+  const legs: StructureLeg[] = [];
+  let origin: string | null = fromCrs;
+  for (const tap of taps) {
+    if (tap.mode === 'exit') {
+      if (tap.crs === toCrs) break; // arrived
+      legs.push({ originCrs: origin, destinationCrs: tap.crs });
+      origin = null;
+    } else if (legs.length > 0 && origin === null) {
+      origin = tap.crs; // a tap-in after a tap-out: the onward leg starts here
+    }
+  }
+  if (legs.length === 0) return null;
+  legs.push({ originCrs: origin, destinationCrs: toCrs });
+  return legs;
+}
+
+/** Where an onward leg starts after a tap-out with no tap-in. */
+export interface OnwardOrigin {
+  readonly originCrs: string;
+  /** Minutes to allow from the previous leg's arrival to the onward departure. */
+  readonly transfer: number;
+}
+
+/** Earliest scheduled arrival (normalised past midnight) at `toCrs` from
+ *  `fromCrs` departing at or after `readyMin`, from the loaded timetable. */
+export function earliestScheduledArrival(
+  db: Database.Database,
+  fromCrs: string,
+  toCrs: string,
+  date: string,
+  readyMin: number,
+): number | null {
+  return scheduledJourneysBetween(db, fromCrs, toCrs, date)
+    .filter((j) => j.scheduledDeparture >= readyMin)
+    .reduce<number | null>((b, j) => {
+      const arr = arrivalAfter(j.scheduledDeparture, j.scheduledArrival);
+      return b === null || arr < b ? arr : b;
+    }, null);
+}
+
+/** Earliest arrival at the destination from a station, departing at/after a
+ *  time, or null if nothing serves it. Supplied by the caller so the probe
+ *  can be national (HSP) rather than the loaded timetable, which only holds
+ *  Southeastern and its London connectors: the onward leg is often another
+ *  operator's (Waterloo -> Honiton is South Western). */
+export type EarliestArrival = (fromCrs: string, readyMin: number) => Promise<number | null>;
+
+/**
+ * After a tap-out at `changeCrs`, the station the onward leg to the
+ * destination leaves from: `changeCrs` itself if it has an onward service,
+ * else the station in the same fare group (e.g. LONDON TERMINALS: Waterloo
+ * East -> Waterloo) whose onward service arrives earliest, allowing
+ * LONDON_TRANSFER for the walk. Null when nothing serves the destination.
+ * The fare-group mates come from the local `locations` table; whether each
+ * has an onward service comes from `earliestArrival`.
+ */
+export async function crossLondonOnwardOrigin(
+  db: Database.Database,
+  changeCrs: string,
+  prevArrivalMin: number,
+  sameStationTransfer: number,
+  earliestArrival: EarliestArrival,
+): Promise<OnwardOrigin | null> {
+  if ((await earliestArrival(changeCrs, prevArrivalMin + sameStationTransfer)) !== null) {
+    return { originCrs: changeCrs, transfer: sameStationTransfer };
+  }
+
+  const mates = (
+    db
+      .prepare(
+        `
+        SELECT DISTINCT l2.crs AS crs
+        FROM locations l1
+        JOIN locations l2 ON l2.fare_group_nlc = l1.fare_group_nlc
+        WHERE l1.crs = ? AND l1.fare_group_nlc <> l1.nlc AND l2.crs IS NOT NULL AND l2.crs <> l1.crs
+      `,
+      )
+      .all(changeCrs) as { crs: string }[]
+  ).map((r) => r.crs);
+
+  let best: OnwardOrigin | null = null;
+  let bestArrival = Number.POSITIVE_INFINITY;
+  for (const mate of mates) {
+    const arr = await earliestArrival(mate, prevArrivalMin + LONDON_TRANSFER);
+    if (arr !== null && arr < bestArrival) {
+      bestArrival = arr;
+      best = { originCrs: mate, transfer: LONDON_TRANSFER };
+    }
+  }
+  return best;
+}
+
 /** A service leaving one station, with where it terminates. */
 export interface OriginService {
   readonly uid: string;

@@ -11,14 +11,17 @@ import type Database from 'better-sqlite3';
 import type { HspClient, Days } from '../hsp/client.js';
 import type { ServiceRun } from '../eligibility/journey.js';
 import {
+  LONDON_TRANSFER,
+  crossLondonOnwardOrigin,
   formatMinutes,
   oneChangeJourney,
   originServiceTermini,
   parseHHMM,
   scheduledJourneysBetween,
   type OriginService,
+  type StructureLeg,
 } from '../timetable/lookup.js';
-import type { IntendedLeg, OnTrainSighting, PlannedItinerary, ScanEvent, TicketInfo } from './types.js';
+import type { GatelineTap, IntendedLeg, OnTrainSighting, PlannedItinerary, ScanEvent, TicketInfo } from './types.js';
 
 const INTERCHANGE = 5;
 const MAX_ITINERARIES = 6;
@@ -265,9 +268,8 @@ export class BatchDataProvider {
    * evening train), and finding that change is journey planning.
    */
   async structuredItinerary(
-    structure: readonly { readonly originCrs: string; readonly destinationCrs: string }[],
-    entry: { readonly crs: string; readonly timeMinutes: number } | null,
-    exit: { readonly crs: string; readonly timeMinutes: number } | null,
+    structure: readonly StructureLeg[],
+    taps: readonly GatelineTap[],
     clips: readonly OnTrainSighting[] = [],
   ): Promise<{ itinerary: PlannedItinerary | null; failedLeg: string | null }> {
     const legs: IntendedLeg[] = [];
@@ -276,22 +278,71 @@ export class BatchDataProvider {
     let inferredChangeAt: string | undefined;
     const notes: string[] = [];
 
+    // Taps are consumed in order, so a station seen twice (out and back on one
+    // coupon) cannot anchor the wrong leg.
+    let tapCursor = 0;
+    const takeTap = (mode: 'entry' | 'exit', crs: string): GatelineTap | null => {
+      for (let t = tapCursor; t < taps.length; t++) {
+        const tap = taps[t]!;
+        if (tap.mode === mode && tap.crs === crs) {
+          tapCursor = t + 1;
+          return tap;
+        }
+      }
+      return null;
+    };
+    let prevExit: GatelineTap | null = null;
+
     for (let i = 0; i < structure.length; i++) {
-      const { originCrs, destinationCrs } = structure[i]!;
+      const { destinationCrs } = structure[i]!;
+      let originCrs = structure[i]!.originCrs;
+      // Previous leg = the last one built, which may be the second half of an
+      // inserted change, so index by legs, not by the structure position.
+      const prev = legs[legs.length - 1] ?? null;
+      let transfer = INTERCHANGE;
+
+      if (originCrs === null) {
+        // A tap-out with no tap-in: the onward train left from the tap-out
+        // station if it serves the destination, else from a nearby station in
+        // the same fare group (Waterloo East -> Waterloo), allowing for the walk.
+        if (!prev) return { itinerary: null, failedLeg: `?->${destinationCrs}` };
+        const onward = await crossLondonOnwardOrigin(this.db, prev.destinationCrs, prev.scheduledArrival, INTERCHANGE, (from, ready) =>
+          this.hspEarliestArrival(from, destinationCrs, ready),
+        );
+        if (!onward) return { itinerary: null, failedLeg: `${prev.destinationCrs}(?)->${destinationCrs}` };
+        originCrs = onward.originCrs;
+        transfer = onward.transfer;
+        if (originCrs !== prev.destinationCrs) {
+          notes.push(
+            `Tapped out at ${prev.destinationCrs}; the onward service to ${destinationCrs} leaves from ${originCrs} ` +
+              `(${transfer} min allowed for the transfer).`,
+          );
+        }
+      } else if (prev && originCrs !== prev.destinationCrs) {
+        transfer = LONDON_TRANSFER;
+      }
+
       const failed = { itinerary: null, failedLeg: `${originCrs}->${destinationCrs}` };
-      const exitHere = exit && exit.crs === destinationCrs ? exit.timeMinutes : null;
+      const entryTap = takeTap('entry', originCrs);
+      const exitTap = takeTap('exit', destinationCrs);
+      const exitHere = exitTap?.timeMinutes ?? null;
+      // A tap-out at the previous leg's destination is its real arrival; if that
+      // was late, the catchable onward service can be hours after the planned
+      // one, so fetch well past it.
+      const afterPrevExit = prevExit ? prevExit.timeMinutes + 240 : 0;
+      prevExit = exitTap;
       let runs: ServiceRun[];
       let intended: ServiceRun | undefined;
       // The departure floor this leg was searched from, when it had one; a
       // leg anchored on a clip or an exit tap has no such floor.
       let anchor: number | null = null;
 
-      if (entry && entry.crs === originCrs) {
-        const from = entry.timeMinutes;
+      if (entryTap) {
+        const from = entryTap.timeMinutes;
         anchor = from;
-        runs = await this.legActuals(originCrs, destinationCrs, from - 15, Math.max(from + 180, exitHere ?? 0));
+        runs = await this.legActuals(originCrs, destinationCrs, from - 15, Math.max(from + 180, exitHere ?? 0, afterPrevExit));
         intended = runs.find((r) => r.scheduledDeparture >= from);
-      } else if (i === 0) {
+      } else if (!prev) {
         const clip = clips.find((c) => c.accepted);
         if (clip) {
           runs = await this.legActuals(originCrs, destinationCrs, clip.timeMinutes - 180, clip.timeMinutes + 60);
@@ -306,11 +357,9 @@ export class BatchDataProvider {
           return failed;
         }
       } else {
-        // Previous leg = the last one built, which may be the second half of an
-        // inserted change, so index by legs, not by the structure position.
-        const from = legs[legs.length - 1]!.scheduledArrival + INTERCHANGE;
+        const from = prev.scheduledArrival + transfer;
         anchor = from;
-        runs = await this.legActuals(originCrs, destinationCrs, from - 15, Math.max(from + 180, exitHere ?? 0));
+        runs = await this.legActuals(originCrs, destinationCrs, from - 15, Math.max(from + 180, exitHere ?? 0, afterPrevExit));
         intended = runs.find((r) => r.scheduledDeparture >= from);
       }
 
@@ -340,7 +389,7 @@ export class BatchDataProvider {
             second.originCrs,
             second.destinationCrs,
             second.scheduledDeparture - 20,
-            Math.max(second.scheduledDeparture + 90, exitHere ?? 0),
+            Math.max(second.scheduledDeparture + 90, exitHere ?? 0, afterPrevExit),
           ),
         );
         inferredChangeAt = split.changeAt;
@@ -361,9 +410,36 @@ export class BatchDataProvider {
       candidatesByLeg.push(runs);
     }
     return {
-      itinerary: { legs, candidatesByLeg, ...(inferredChangeAt ? { inferredChangeAt, notes } : {}) },
+      itinerary: { legs, candidatesByLeg, ...(inferredChangeAt || notes.length > 0 ? { inferredChangeAt, notes } : {}) },
       failedLeg: null,
     };
+  }
+
+  /**
+   * Earliest scheduled arrival at `toCrs` from `fromCrs` departing at/after
+   * `readyMin`, from HSP's service list alone (no per-service details, so it
+   * is one cheap call). National, so it sees other operators' onward legs
+   * that the loaded timetable does not.
+   */
+  private async hspEarliestArrival(fromCrs: string, toCrs: string, readyMin: number): Promise<number | null> {
+    const metrics = await this.hsp.serviceMetrics({
+      from_loc: fromCrs,
+      to_loc: toCrs,
+      from_time: toHHMM(readyMin),
+      to_time: toHHMM(readyMin + 180),
+      from_date: this.date,
+      to_date: this.date,
+      days: daysOfWeek(this.date),
+    });
+    let best: number | null = null;
+    for (const entry of metrics.Services) {
+      const dep = hspTime(entry.serviceAttributesMetrics.gbtt_ptd);
+      const arr = hspTime(entry.serviceAttributesMetrics.gbtt_pta);
+      if (dep === null || arr === null || dep < readyMin) continue;
+      const normalised = arr < dep ? arr + 1440 : arr;
+      if (best === null || normalised < best) best = normalised;
+    }
+    return best;
   }
 
   /** Builds the booked itinerary for an Advance ticket (inferred if needed). */
@@ -440,10 +516,25 @@ export class BatchDataProvider {
       if (onwardSchedule.length === 0) continue;
       processed += 1;
 
-      // Actual onward runs, anchored on the exit tap where we have one.
-      const l2From = exitMin !== null ? exitMin - 180 : onwardSchedule[0]!.scheduledDeparture - 10;
-      const l2To = exitMin !== null ? exitMin : onwardSchedule[0]!.scheduledDeparture + 120;
-      const leg2 = await this.legActuals(terminusCrs, toCrs, l2From, l2To);
+      // First leg and onward candidates. An entry tap says when the customer
+      // set out, so they boarded the next origin service after it, and the
+      // onward candidates follow from its arrival (the engine then chains the
+      // actual connection, made or missed). With only an exit tap, anchor the
+      // onward leg on it and work backwards to the latest origin service that
+      // still connects to the train they caught.
+      let fromEntry: OriginService | null = null;
+      let leg2: ServiceRun[];
+      if (entryMin !== null) {
+        fromEntry = origins
+          .filter((o) => o.originDeparture >= entryMin)
+          .reduce<OriginService | null>((best, o) => (!best || o.originDeparture < best.originDeparture ? o : best), null);
+        if (!fromEntry) continue;
+        leg2 = await this.legActuals(terminusCrs, toCrs, fromEntry.terminusArrival - 10, Math.max(fromEntry.terminusArrival + 240, exitMin ?? 0));
+      } else {
+        const l2From = exitMin !== null ? exitMin - 180 : onwardSchedule[0]!.scheduledDeparture - 10;
+        const l2To = exitMin !== null ? exitMin : onwardSchedule[0]!.scheduledDeparture + 120;
+        leg2 = await this.legActuals(terminusCrs, toCrs, l2From, l2To);
+      }
       const arrivable = leg2.filter((r) => !r.cancelled && r.actualArrival !== null && r.actualDeparture !== null);
       if (arrivable.length === 0) continue;
 
@@ -454,12 +545,14 @@ export class BatchDataProvider {
               .filter((r) => r.actualArrival! <= exitMin + INTERCHANGE)
               .reduce<ServiceRun | null>((best, r) => (!best || r.actualArrival! > best.actualArrival! ? r : best), null)
           : arrivable.reduce<ServiceRun | null>((best, r) => (!best || r.actualArrival! < best.actualArrival! ? r : best), null);
-      if (!caught) continue;
 
-      // First leg: the origin service that connects to `caught`, latest first.
-      const leg1o = origins
-        .filter((o) => o.terminusArrival + INTERCHANGE <= caught.actualDeparture!)
-        .reduce<OriginService | null>((best, o) => (!best || o.terminusArrival > best.terminusArrival ? o : best), null);
+      const leg1o =
+        fromEntry ??
+        (caught
+          ? origins
+              .filter((o) => o.terminusArrival + INTERCHANGE <= caught.actualDeparture!)
+              .reduce<OriginService | null>((best, o) => (!best || o.terminusArrival > best.terminusArrival ? o : best), null)
+          : null);
       if (!leg1o) continue;
 
       const leg1 = await this.legActuals(fromCrs, terminusCrs, leg1o.originDeparture - 10, leg1o.originDeparture + 10);
@@ -482,7 +575,7 @@ export class BatchDataProvider {
       };
       // Prefer a tight exit match, then the latest-departing first leg (people
       // take the last train that still makes the connection, not the first).
-      const exitFit = exitMin !== null ? -Math.abs(exitMin - caught.actualArrival!) : 0;
+      const exitFit = exitMin !== null && caught ? -Math.abs(exitMin - caught.actualArrival!) : 0;
       scored.push({ itinerary, score: exitFit * 1000 + leg1o.originDeparture });
     }
 

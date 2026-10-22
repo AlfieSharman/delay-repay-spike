@@ -20,6 +20,7 @@ function at(hhmm: string): number {
 const NLC_TO_CRS: Record<string, string> = {
   '5191': 'SOO', '1555': 'STP', '5196': 'WHI', '5226': 'RBR', '5143': 'CHX',
   '5199': 'CTM', '5426': 'VIC', '5234': 'EFL', '5142': 'CST',
+  '5717': 'HON', '5598': 'WAT', '5158': 'WAE', '5219': 'HGS',
 };
 const nlcToCrs = (nlc: string): string | null => NLC_TO_CRS[nlc] ?? null;
 
@@ -426,6 +427,133 @@ test('An inserted change caps confidence at INFERRED and is narrated', () => {
   assert.equal(v.confidence, 'INFERRED');
   assert.equal(v.delayMinutes, 0);
   assert.ok(v.explanation.some((l) => l.includes('inserted a change at PDW')));
+});
+
+// Every gateline tap is kept in order, so a change (tap-out then tap-in) is
+// visible even though `entry`/`exit` only carry the first and last.
+test('extractConstraints keeps every gateline tap in order', () => {
+  const scans: RawScan[] = [
+    { SCANID: 1, coupon_type: 'Outward', TIME: '2026-08-24T10:15:00+01:00', STATION: '5717', scan_mode: 'entry', action_text: 'Accepted' },
+    { SCANID: 2, coupon_type: 'Outward', TIME: '2026-08-24T13:54:00+01:00', STATION: '5598', scan_mode: 'exit', action_text: 'Accepted' },
+    { SCANID: 3, coupon_type: 'Outward', TIME: '2026-08-24T19:06:00+01:00', STATION: '5158', scan_mode: 'entry', action_text: 'Accepted' },
+    { SCANID: 4, coupon_type: 'Outward', TIME: '2026-08-24T20:55:00+01:00', STATION: '5219', scan_mode: 'exit', action_text: 'Accepted' },
+  ];
+  const c = extractConstraints('Outward', groupByCoupon(normaliseScans(scans, nlcToCrs)).get('Outward') ?? []);
+  assert.deepEqual(c.entry, { crs: 'HON', timeMinutes: at('10:15') });
+  assert.deepEqual(c.exit, { crs: 'HGS', timeMinutes: at('20:55') });
+  assert.deepEqual(
+    c.taps?.map((t) => `${t.mode}@${t.crs}`),
+    ['entry@HON', 'exit@WAT', 'entry@WAE', 'exit@HGS'],
+  );
+});
+
+// With the full tap list, a tap-in at a later leg's origin floors that leg
+// even though `entry` (the first tap) is at the journey origin.
+test('A later tap-in in the tap list floors the onward leg (engine path)', () => {
+  const t = ticket({ utn: 'TAPS', ftot: 'SVR', kind: 'walk-up', fareType: 'return', pricePence: 9140 });
+  const itin: PlannedItinerary = {
+    legs: breakOfJourneyLegs(),
+    candidatesByLeg: [[run('l1', '10:30', '13:20', '10:31', '13:22')], breakOfJourneyOnward()],
+  };
+  const constraints: JourneyConstraints = {
+    coupon: 'Outward',
+    entry: { crs: 'HON', timeMinutes: at('10:15') }, // first tap, at the origin
+    exit: { crs: 'HGS', timeMinutes: at('21:25') },
+    taps: [
+      { crs: 'HON', timeMinutes: at('10:15'), mode: 'entry' },
+      { crs: 'WAT', timeMinutes: at('13:54'), mode: 'exit' },
+      { crs: 'WAE', timeMinutes: at('19:06'), mode: 'entry' }, // only visible via taps
+      { crs: 'HGS', timeMinutes: at('21:25'), mode: 'exit' },
+    ],
+    onTrain: [], reasonCodes: [], anomalies: [],
+  };
+  const v = assessCoupon({
+    ticket: t, coupon: 'Outward', fromCrs: 'HON', toCrs: 'HGS', constraints,
+    itineraries: [itin], bookedLegs: null,
+  });
+  assert.equal(v.delayMinutes, 20); // the 19:15 they took after tapping in, not the 14:15
+});
+
+// The clip identifies the service by itself: pinning must work even when the
+// discovered itinerary can't be resolved (its candidates all unboardable).
+test('Clip pinning from clipServices does not wait on the itinerary resolving', () => {
+  const t = ticket({ utn: 'CLIPNR', ftot: 'CDS', kind: 'walk-up', fareType: 'single', pricePence: 900 });
+  const itin: PlannedItinerary = {
+    legs: [leg('KTH', 'TON', '16:17', '17:12')],
+    candidatesByLeg: [[run('dead', '16:17', '17:12', '16:17', null)]], // cancelled: nothing to resolve
+  };
+  const constraints: JourneyConstraints = {
+    coupon: 'Single',
+    exit: { crs: 'TON', timeMinutes: at('17:52') },
+    onTrain: [{
+      info: { raw: 'CHX-HGS', routeFromCrs: 'CHX', routeToCrs: 'HGS', scheduledDeparture: at('16:45'), serviceIds: ['SE2102'] },
+      timeMinutes: at('17:33'), accepted: true,
+    }],
+    reasonCodes: [], anomalies: [],
+  };
+  const clipService: ServiceRun = { ...run('clip', '16:45', '17:29', '16:52', '17:43'), callingPoints: ['CHX', 'SEV', 'TON'] };
+  const v = assessCoupon({
+    ticket: t, coupon: 'Single', fromCrs: 'KTH', toCrs: 'TON', constraints,
+    itineraries: [itin], bookedLegs: null, clipServices: [clipService],
+  });
+  assert.equal(v.delayMinutes, 14);
+  assert.equal(v.confidence, 'CONFIRMED');
+});
+
+// A discovered (unpinned) itinerary the engine cannot complete is most likely
+// the wrong guess: it must come back unresolved, never as the 120+ band. Here
+// the only first-leg run left 2 min early, so the resolver (no lower bound)
+// accepts it but the engine (from the scheduled 10:00) cannot board it.
+test('An uncompletable discovered itinerary is unresolved, not awarded 120+', () => {
+  const t = ticket({ utn: 'GUESS', ftot: 'SDS', kind: 'walk-up', fareType: 'single', pricePence: 1000 });
+  const itin: PlannedItinerary = {
+    legs: [leg('CTM', 'TON', '10:00', '10:30'), leg('TON', 'TBW', '10:40', '11:10')],
+    candidatesByLeg: [
+      [run('early', '10:00', '10:30', '09:58', '10:30')],
+      [run('q', '10:40', '11:10', '10:40', '11:10')],
+    ],
+  };
+  const constraints: JourneyConstraints = {
+    coupon: 'Single',
+    exit: { crs: 'TBW', timeMinutes: at('11:12') },
+    onTrain: [], reasonCodes: [], anomalies: [],
+  };
+  const v = assessCoupon({
+    ticket: t, coupon: 'Single', fromCrs: 'CTM', toCrs: 'TBW', constraints,
+    itineraries: [itin], bookedLegs: null, // not pinned: discovered
+  });
+  assert.equal(v.entitled, false);
+  assert.equal(v.reason, 'SERVICE_UNRESOLVED');
+  assert.notEqual(v.band, '120+');
+});
+
+// A connection the planning rule calls missed by a minute (arrive 08:26,
+// onward actually left 08:31, ready 08:31 not strictly before it) but which the
+// exit tap proves was made. The resolver must accept it, and best-achievable
+// can never be later than that evidenced arrival: 0 min, not the 12 the engine
+// would chain via the 08:45. Regression for TRB2VTTTNVR's outward, scans-only.
+test('A tight connection the taps prove was made is not treated as missed', () => {
+  const t = ticket({ utn: 'TIGHT', ftot: 'SDR', kind: 'walk-up', fareType: 'return', pricePence: 2000 });
+  const itin: PlannedItinerary = {
+    legs: [leg('SOO', 'TON', '07:32', '08:26'), leg('TON', 'TBW', '08:32', '08:43')],
+    candidatesByLeg: [
+      [run('l1', '07:32', '08:26', '07:33', '08:26')],
+      [run('tight', '08:32', '08:43', '08:31', '08:43'), run('next', '08:45', '08:56', '08:45', '08:55')],
+    ],
+  };
+  const constraints: JourneyConstraints = {
+    coupon: 'Outward',
+    entry: { crs: 'SOO', timeMinutes: at('07:30') },
+    exit: { crs: 'TBW', timeMinutes: at('08:44') }, // corroborates the 08:43 arrival
+    onTrain: [], reasonCodes: [], anomalies: [],
+  };
+  const v = assessCoupon({
+    ticket: t, coupon: 'Outward', fromCrs: 'SOO', toCrs: 'TBW', constraints,
+    itineraries: [itin], bookedLegs: null,
+  });
+  assert.equal(v.delayMinutes, 0);
+  assert.equal(v.entitled, false);
+  assert.ok(v.explanation.some((l) => l.includes('evidenced arrival')));
 });
 
 // -------------------------------- Clip pinning reports the ridden service's own delay
