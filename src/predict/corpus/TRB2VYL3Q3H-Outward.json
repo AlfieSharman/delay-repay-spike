@@ -1,0 +1,250 @@
+{
+  "utn": "TRB2VYL3Q3H",
+  "coupon": "Outward",
+  "input": {
+    "ticket": {
+      "utn": "TRB2VYL3Q3H",
+      "ftot": "SVR",
+      "originNlc": "5219",
+      "destinationNlc": "5717",
+      "routeCode": "00703",
+      "pricePence": 9140,
+      "startDate": "2026-08-21",
+      "timeValidFrom": null,
+      "kind": "walk-up",
+      "fareType": "return",
+      "hasTimeRestriction": true
+    },
+    "coupon": "Outward",
+    "fromCrs": "HGS",
+    "toCrs": "HON",
+    "constraints": {
+      "coupon": "Outward",
+      "entry": {
+        "crs": "HGS",
+        "timeMinutes": 796
+      },
+      "exit": {
+        "crs": "WAE",
+        "timeMinutes": 935
+      },
+      "onTrain": [
+        {
+          "info": {
+            "raw": "Fr1330 HGS-CHX 1H86/SE2286",
+            "routeFromCrs": "HGS",
+            "routeToCrs": "CHX",
+            "scheduledDeparture": 810,
+            "serviceIds": [
+              "1H86",
+              "SE2286"
+            ]
+          },
+          "timeMinutes": 834,
+          "accepted": true
+        }
+      ],
+      "reasonCodes": [],
+      "anomalies": []
+    },
+    "itineraries": [
+      {
+        "legs": [
+          {
+            "originCrs": "HGS",
+            "destinationCrs": "WAE",
+            "scheduledDeparture": 810,
+            "scheduledArrival": 899
+          },
+          {
+            "originCrs": "WAT",
+            "destinationCrs": "HON",
+            "scheduledDeparture": 920,
+            "scheduledArrival": 1122
+          }
+        ],
+        "candidatesByLeg": [
+          [
+            {
+              "id": "202608218085602",
+              "scheduledDeparture": 810,
+              "scheduledArrival": 899,
+              "actualDeparture": 815,
+              "actualArrival": null,
+              "cancelled": true,
+              "callingPoints": [
+                "HGS",
+                "SLQ",
+                "BAT",
+                "WAD",
+                "TBW",
+                "HIB",
+                "TON",
+                "HLB",
+                "SEV",
+                "ORP",
+                "LBG",
+                "WAE"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218085605",
+              "scheduledDeparture": 830,
+              "scheduledArrival": 929,
+              "actualDeparture": 830,
+              "actualArrival": 932,
+              "cancelled": false,
+              "callingPoints": [
+                "HGS",
+                "SLQ",
+                "WLD",
+                "CWU",
+                "BAT",
+                "RBR",
+                "ETC",
+                "SOG",
+                "WAD",
+                "FRT",
+                "TBW",
+                "HIB",
+                "TON",
+                "SEV",
+                "ORP",
+                "LBG",
+                "WAE"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218085502",
+              "scheduledDeparture": 870,
+              "scheduledArrival": 959,
+              "actualDeparture": 871,
+              "actualArrival": 963,
+              "cancelled": false,
+              "callingPoints": [
+                "HGS",
+                "SLQ",
+                "BAT",
+                "WAD",
+                "TBW",
+                "HIB",
+                "TON",
+                "HLB",
+                "SEV",
+                "ORP",
+                "LBG",
+                "WAE"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218085505",
+              "scheduledDeparture": 890,
+              "scheduledArrival": 989,
+              "actualDeparture": 896,
+              "actualArrival": 1000,
+              "cancelled": false,
+              "callingPoints": [
+                "HGS",
+                "SLQ",
+                "WLD",
+                "CWU",
+                "BAT",
+                "RBR",
+                "ETC",
+                "SOG",
+                "WAD",
+                "FRT",
+                "TBW",
+                "HIB",
+                "TON",
+                "SEV",
+                "ORP",
+                "LBG",
+                "WAE"
+              ],
+              "toc": "SE"
+            }
+          ],
+          [
+            {
+              "id": "202608217679406",
+              "scheduledDeparture": 920,
+              "scheduledArrival": 1122,
+              "actualDeparture": 920,
+              "actualArrival": 1121,
+              "cancelled": false,
+              "callingPoints": [
+                "WAT",
+                "CLJ",
+                "WOK",
+                "BSK",
+                "ADV",
+                "SAL",
+                "TIS",
+                "GIL",
+                "TMC",
+                "SHE",
+                "YVJ",
+                "CKN",
+                "AXM",
+                "HON"
+              ],
+              "toc": "SW"
+            },
+            {
+              "id": "202608217679428",
+              "scheduledDeparture": 1043,
+              "scheduledArrival": 1234,
+              "actualDeparture": 1042,
+              "actualArrival": 1237,
+              "cancelled": false,
+              "callingPoints": [
+                "WAT",
+                "BSK",
+                "OVR",
+                "WCH",
+                "ADV",
+                "GRT",
+                "SAL",
+                "TIS",
+                "GIL",
+                "TMC",
+                "SHE",
+                "YVJ",
+                "CKN",
+                "AXM",
+                "HON"
+              ],
+              "toc": "SW"
+            }
+          ]
+        ]
+      }
+    ],
+    "bookedLegs": null,
+    "routeDef": {
+      "code": "00703",
+      "description": "LONDON NOT UND",
+      "category": "other",
+      "includeLocations": [],
+      "excludeLocations": [
+        "SLO",
+        "SFA"
+      ]
+    },
+    "restrictionDef": null,
+    "itineraryPinned": true,
+    "clipServices": []
+  },
+  "expected": {
+    "entitled": true,
+    "reason": null,
+    "confidence": "PROBABLE",
+    "delayMinutes": 115,
+    "band": "60-119",
+    "compensationPence": 4570
+  }
+}

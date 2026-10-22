@@ -146,6 +146,11 @@ Notes:
   prediction pipeline are pure functions, tested end to end against the real
   reference tickets. Add cases by constructing scans / service runs by hand; no
   network needed.
+- **The regression corpus** (`src/predict/corpus/`) replays real claims whose
+  verdicts were verified by hand against HSP, as recorded inputs to the
+  assessor, inside `npm test`. Record a verified claim with
+  `npm run batch -- <dir> --record src/predict/corpus`; the README there says
+  what each claim proves.
 - **New validity logic is validated against the Odyssey journey-planner
   oracle** (which fares and route codes it sells per journey), not just against
   a manual reading of the spec.

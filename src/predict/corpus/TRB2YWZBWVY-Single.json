@@ -1,0 +1,223 @@
+{
+  "utn": "TRB2YWZBWVY",
+  "coupon": "Single",
+  "input": {
+    "ticket": {
+      "utn": "TRB2YWZBWVY",
+      "ftot": "SWS",
+      "originNlc": "1072",
+      "destinationNlc": "5226",
+      "routeCode": "00000",
+      "pricePence": 1695,
+      "startDate": "2026-08-21",
+      "timeValidFrom": null,
+      "kind": "walk-up",
+      "fareType": "single",
+      "hasTimeRestriction": true
+    },
+    "coupon": "Single",
+    "fromCrs": "LBG",
+    "toCrs": "RBR",
+    "constraints": {
+      "coupon": "Single",
+      "entry": {
+        "crs": "CST",
+        "timeMinutes": 1057
+      },
+      "onTrain": [
+        {
+          "info": {
+            "raw": "Fr1745 CST-HGS 1H95/SE2195",
+            "routeFromCrs": "CST",
+            "routeToCrs": "HGS",
+            "scheduledDeparture": 1065,
+            "serviceIds": [
+              "1H95",
+              "SE2195"
+            ]
+          },
+          "timeMinutes": 1110,
+          "accepted": true
+        }
+      ],
+      "reasonCodes": [],
+      "anomalies": []
+    },
+    "itineraries": [
+      {
+        "legs": [
+          {
+            "originCrs": "LBG",
+            "destinationCrs": "RBR",
+            "scheduledDeparture": 1070,
+            "scheduledArrival": 1136
+          }
+        ],
+        "candidatesByLeg": [
+          [
+            {
+              "id": "202608218085612",
+              "scheduledDeparture": 1070,
+              "scheduledArrival": 1136,
+              "actualDeparture": 1070,
+              "actualArrival": null,
+              "cancelled": true,
+              "callingPoints": [
+                "LBG",
+                "CLD",
+                "HIB",
+                "TBW",
+                "FRT",
+                "WAD",
+                "SOG",
+                "ETC",
+                "RBR"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218085407",
+              "scheduledDeparture": 1074,
+              "scheduledArrival": 1145,
+              "actualDeparture": 1074,
+              "actualArrival": 1153,
+              "cancelled": false,
+              "callingPoints": [
+                "LBG",
+                "SEV",
+                "TON",
+                "HIB",
+                "TBW",
+                "WAD",
+                "ETC",
+                "RBR"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218085613",
+              "scheduledDeparture": 1100,
+              "scheduledArrival": 1163,
+              "actualDeparture": 1110,
+              "actualArrival": 1189,
+              "cancelled": false,
+              "callingPoints": [
+                "LBG",
+                "CLD",
+                "HIB",
+                "TBW",
+                "WAD",
+                "ETC",
+                "RBR"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218085412",
+              "scheduledDeparture": 1104,
+              "scheduledArrival": 1179,
+              "actualDeparture": 1115,
+              "actualArrival": 1202,
+              "cancelled": false,
+              "callingPoints": [
+                "LBG",
+                "SEV",
+                "TON",
+                "HIB",
+                "TBW",
+                "FRT",
+                "WAD",
+                "SOG",
+                "ETC",
+                "RBR"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218085417",
+              "scheduledDeparture": 1134,
+              "scheduledArrival": 1206,
+              "actualDeparture": 1139,
+              "actualArrival": 1215,
+              "cancelled": false,
+              "callingPoints": [
+                "LBG",
+                "SEV",
+                "TON",
+                "HIB",
+                "TBW",
+                "FRT",
+                "WAD",
+                "SOG",
+                "ETC",
+                "RBR"
+              ],
+              "toc": "SE"
+            }
+          ]
+        ]
+      }
+    ],
+    "bookedLegs": null,
+    "routeDef": {
+      "code": "00000",
+      "description": "ANY PERMITTED",
+      "category": "any-permitted",
+      "includeLocations": [],
+      "excludeLocations": [
+        "SHV"
+      ]
+    },
+    "restrictionDef": {
+      "code": "F4",
+      "description": "SUPER OFF-PEAK DAY",
+      "typeOut": "P",
+      "typeReturn": "N",
+      "timeRestrictions": [
+        {
+          "sequence": "0001",
+          "outReturn": "O",
+          "timeFrom": 240,
+          "timeTo": 599,
+          "arrDepVia": "D",
+          "location": null,
+          "minFareOnly": false,
+          "dateBands": [],
+          "tocs": {}
+        }
+      ]
+    },
+    "itineraryPinned": true,
+    "clipServices": [
+      {
+        "id": "202608218085612",
+        "scheduledDeparture": 1065,
+        "scheduledArrival": 1136,
+        "actualDeparture": 1066,
+        "actualArrival": null,
+        "cancelled": true,
+        "callingPoints": [
+          "CST",
+          "LBG",
+          "CLD",
+          "HIB",
+          "TBW",
+          "FRT",
+          "WAD",
+          "SOG",
+          "ETC",
+          "RBR"
+        ],
+        "toc": "SE"
+      }
+    ]
+  },
+  "expected": {
+    "entitled": true,
+    "reason": null,
+    "confidence": "INFERRED",
+    "delayMinutes": 17,
+    "band": "15-29",
+    "compensationPence": 424
+  }
+}

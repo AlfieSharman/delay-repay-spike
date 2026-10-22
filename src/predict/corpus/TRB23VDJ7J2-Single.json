@@ -1,0 +1,216 @@
+{
+  "utn": "TRB23VDJ7J2",
+  "coupon": "Single",
+  "input": {
+    "ticket": {
+      "utn": "TRB23VDJ7J2",
+      "ftot": "SKC",
+      "originNlc": "5164",
+      "destinationNlc": "0432",
+      "routeCode": "00708",
+      "pricePence": 495,
+      "startDate": "2026-08-21",
+      "timeValidFrom": "17:10",
+      "kind": "advance",
+      "fareType": "single",
+      "hasTimeRestriction": false
+    },
+    "coupon": "Single",
+    "fromCrs": "CBE",
+    "toCrs": "FKC",
+    "constraints": {
+      "coupon": "Single",
+      "entry": {
+        "crs": "CBE",
+        "timeMinutes": 1030
+      },
+      "exit": {
+        "crs": "FKC",
+        "timeMinutes": 1115
+      },
+      "onTrain": [],
+      "reasonCodes": [],
+      "anomalies": []
+    },
+    "itineraries": [
+      {
+        "legs": [
+          {
+            "originCrs": "CBE",
+            "destinationCrs": "DVP",
+            "scheduledDeparture": 1030,
+            "scheduledArrival": 1059
+          },
+          {
+            "originCrs": "DVP",
+            "destinationCrs": "FKC",
+            "scheduledDeparture": 1068,
+            "scheduledArrival": 1078
+          }
+        ],
+        "candidatesByLeg": [
+          [
+            {
+              "id": "202608218086305",
+              "scheduledDeparture": 1030,
+              "scheduledArrival": 1059,
+              "actualDeparture": 1045,
+              "actualArrival": 1075,
+              "cancelled": false,
+              "callingPoints": [
+                "CBE",
+                "BKS",
+                "ADM",
+                "AYH",
+                "SWO",
+                "SPH",
+                "KSN",
+                "DVP"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218086310",
+              "scheduledDeparture": 1063,
+              "scheduledArrival": 1092,
+              "actualDeparture": 1071,
+              "actualArrival": 1100,
+              "cancelled": false,
+              "callingPoints": [
+                "CBE",
+                "BKS",
+                "ADM",
+                "AYH",
+                "SWO",
+                "SPH",
+                "KSN",
+                "DVP"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218085394",
+              "scheduledDeparture": 1091,
+              "scheduledArrival": 1121,
+              "actualDeparture": 1090,
+              "actualArrival": 1119,
+              "cancelled": false,
+              "callingPoints": [
+                "CBE",
+                "BKS",
+                "ADM",
+                "AYH",
+                "SWO",
+                "SPH",
+                "KSN",
+                "DVP"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218086318",
+              "scheduledDeparture": 1118,
+              "scheduledArrival": 1148,
+              "actualDeparture": 1121,
+              "actualArrival": 1151,
+              "cancelled": false,
+              "callingPoints": [
+                "CBE",
+                "BKS",
+                "ADM",
+                "AYH",
+                "SWO",
+                "SPH",
+                "KSN",
+                "DVP"
+              ],
+              "toc": "SE"
+            }
+          ],
+          [
+            {
+              "id": "202608218085964",
+              "scheduledDeparture": 1068,
+              "scheduledArrival": 1078,
+              "actualDeparture": 1068,
+              "actualArrival": 1077,
+              "cancelled": false,
+              "callingPoints": [
+                "DVP",
+                "FKC"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218090327",
+              "scheduledDeparture": 1074,
+              "scheduledArrival": 1084,
+              "actualDeparture": 1074,
+              "actualArrival": 1083,
+              "cancelled": false,
+              "callingPoints": [
+                "DVP",
+                "FKC"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218090330",
+              "scheduledDeparture": 1104,
+              "scheduledArrival": 1114,
+              "actualDeparture": 1105,
+              "actualArrival": 1114,
+              "cancelled": false,
+              "callingPoints": [
+                "DVP",
+                "FKC"
+              ],
+              "toc": "SE"
+            }
+          ]
+        ]
+      }
+    ],
+    "bookedLegs": [
+      {
+        "originCrs": "CBE",
+        "destinationCrs": "DVP",
+        "scheduledDeparture": 1030,
+        "scheduledArrival": 1059
+      },
+      {
+        "originCrs": "DVP",
+        "destinationCrs": "FKC",
+        "scheduledDeparture": 1068,
+        "scheduledArrival": 1078
+      }
+    ],
+    "routeDef": {
+      "code": "00708",
+      "description": "VIA KEARSNEY",
+      "category": "other",
+      "includeLocations": [
+        "KSN",
+        "SPH"
+      ],
+      "excludeLocations": []
+    },
+    "restrictionDef": {
+      "code": "SA",
+      "description": "NSE ADVANCE",
+      "typeOut": "N",
+      "typeReturn": "N",
+      "timeRestrictions": []
+    },
+    "itineraryPinned": true,
+    "clipServices": []
+  },
+  "expected": {
+    "entitled": true,
+    "reason": null,
+    "confidence": "CONFIRMED",
+    "delayMinutes": 36,
+    "band": "30-59",
+    "compensationPence": 248
+  }
+}

@@ -1,0 +1,297 @@
+{
+  "utn": "TRB2VYL3Q3H",
+  "coupon": "Return",
+  "input": {
+    "ticket": {
+      "utn": "TRB2VYL3Q3H",
+      "ftot": "SVR",
+      "originNlc": "5219",
+      "destinationNlc": "5717",
+      "routeCode": "00703",
+      "pricePence": 9140,
+      "startDate": "2026-08-24",
+      "timeValidFrom": null,
+      "kind": "walk-up",
+      "fareType": "return",
+      "hasTimeRestriction": true
+    },
+    "coupon": "Return",
+    "fromCrs": "HON",
+    "toCrs": "HGS",
+    "constraints": {
+      "coupon": "Return",
+      "entry": {
+        "crs": "WAE",
+        "timeMinutes": 1146
+      },
+      "exit": {
+        "crs": "WAT",
+        "timeMinutes": 834
+      },
+      "onTrain": [
+        {
+          "info": {
+            "raw": "Mo1000 EXD-WAT 1L40/SW1440",
+            "routeFromCrs": "EXD",
+            "routeToCrs": "WAT",
+            "scheduledDeparture": 600,
+            "serviceIds": [
+              "1L40",
+              "SW1440"
+            ]
+          },
+          "timeMinutes": 694,
+          "accepted": true
+        }
+      ],
+      "reasonCodes": [],
+      "anomalies": []
+    },
+    "itineraries": [
+      {
+        "legs": [
+          {
+            "originCrs": "HON",
+            "destinationCrs": "WAT",
+            "scheduledDeparture": 631,
+            "scheduledArrival": 829
+          },
+          {
+            "originCrs": "WAE",
+            "destinationCrs": "HGS",
+            "scheduledDeparture": 1158,
+            "scheduledArrival": 1253
+          }
+        ],
+        "candidatesByLeg": [
+          [
+            {
+              "id": "202608247679392",
+              "scheduledDeparture": 631,
+              "scheduledArrival": 829,
+              "actualDeparture": 634,
+              "actualArrival": 828,
+              "cancelled": false,
+              "callingPoints": [
+                "HON",
+                "AXM",
+                "CKN",
+                "YVJ",
+                "SHE",
+                "TMC",
+                "GIL",
+                "TIS",
+                "SAL",
+                "ADV",
+                "BSK",
+                "WOK",
+                "CLJ",
+                "WAT"
+              ],
+              "toc": "SW"
+            },
+            {
+              "id": "202608247679414",
+              "scheduledDeparture": 751,
+              "scheduledArrival": 949,
+              "actualDeparture": 759,
+              "actualArrival": 950,
+              "cancelled": false,
+              "callingPoints": [
+                "HON",
+                "AXM",
+                "CKN",
+                "YVJ",
+                "SHE",
+                "TMC",
+                "GIL",
+                "TIS",
+                "SAL",
+                "ADV",
+                "BSK",
+                "WOK",
+                "CLJ",
+                "WAT"
+              ],
+              "toc": "SW"
+            }
+          ],
+          [
+            {
+              "id": "202608248085422",
+              "scheduledDeparture": 1158,
+              "scheduledArrival": 1253,
+              "actualDeparture": 1158,
+              "actualArrival": 1255,
+              "cancelled": false,
+              "callingPoints": [
+                "WAE",
+                "LBG",
+                "SEV",
+                "TON",
+                "HIB",
+                "TBW",
+                "WAD",
+                "ETC",
+                "RBR",
+                "BAT",
+                "SLQ",
+                "HGS"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608248085429",
+              "scheduledDeparture": 1188,
+              "scheduledArrival": 1289,
+              "actualDeparture": 1187,
+              "actualArrival": 1294,
+              "cancelled": false,
+              "callingPoints": [
+                "WAE",
+                "LBG",
+                "SEV",
+                "TON",
+                "HIB",
+                "TBW",
+                "FRT",
+                "WAD",
+                "SOG",
+                "ETC",
+                "RBR",
+                "BAT",
+                "CWU",
+                "WLD",
+                "SLQ",
+                "HGS"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608248085434",
+              "scheduledDeparture": 1218,
+              "scheduledArrival": 1313,
+              "actualDeparture": 1223,
+              "actualArrival": 1315,
+              "cancelled": false,
+              "callingPoints": [
+                "WAE",
+                "LBG",
+                "SEV",
+                "TON",
+                "HIB",
+                "TBW",
+                "WAD",
+                "ETC",
+                "RBR",
+                "BAT",
+                "SLQ",
+                "HGS"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608248085440",
+              "scheduledDeparture": 1248,
+              "scheduledArrival": 1349,
+              "actualDeparture": 1249,
+              "actualArrival": 1349,
+              "cancelled": false,
+              "callingPoints": [
+                "WAE",
+                "LBG",
+                "SEV",
+                "TON",
+                "HIB",
+                "TBW",
+                "FRT",
+                "WAD",
+                "SOG",
+                "ETC",
+                "RBR",
+                "BAT",
+                "CWU",
+                "WLD",
+                "SLQ",
+                "HGS"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608248085446",
+              "scheduledDeparture": 1278,
+              "scheduledArrival": 1373,
+              "actualDeparture": null,
+              "actualArrival": 1373,
+              "cancelled": false,
+              "callingPoints": [
+                "WAE",
+                "LBG",
+                "SEV",
+                "TON",
+                "HIB",
+                "TBW",
+                "WAD",
+                "ETC",
+                "RBR",
+                "BAT",
+                "SLQ",
+                "HGS"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608248085452",
+              "scheduledDeparture": 1308,
+              "scheduledArrival": 1409,
+              "actualDeparture": 1307,
+              "actualArrival": 1415,
+              "cancelled": false,
+              "callingPoints": [
+                "WAE",
+                "LBG",
+                "SEV",
+                "TON",
+                "HIB",
+                "TBW",
+                "FRT",
+                "WAD",
+                "SOG",
+                "ETC",
+                "RBR",
+                "BAT",
+                "CWU",
+                "WLD",
+                "SLQ",
+                "HGS"
+              ],
+              "toc": "SE"
+            }
+          ]
+        ]
+      }
+    ],
+    "bookedLegs": null,
+    "routeDef": {
+      "code": "00703",
+      "description": "LONDON NOT UND",
+      "category": "other",
+      "includeLocations": [],
+      "excludeLocations": [
+        "SLO",
+        "SFA"
+      ]
+    },
+    "restrictionDef": null,
+    "itineraryPinned": false,
+    "clipServices": []
+  },
+  "expected": {
+    "entitled": false,
+    "reason": "BELOW_THRESHOLD",
+    "confidence": "INFERRED",
+    "delayMinutes": 2,
+    "band": null,
+    "compensationPence": null
+  }
+}

@@ -11,11 +11,11 @@
  */
 
 import 'dotenv/config';
-import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { openDb } from './db/schema.js';
 import { HspClient } from './hsp/client.js';
-import { assessCoupon } from './predict/assess.js';
+import { assessCoupon, type AssessCouponInput } from './predict/assess.js';
 import { parseItineraryLegs, type RawItinerary } from './predict/itinerary.js';
 import { BatchDataProvider } from './predict/provider.js';
 import { findRstFile, loadRestrictions, type RestrictionDefinition } from './predict/restrictions.js';
@@ -59,6 +59,34 @@ function exitFor(constraints: ReturnType<typeof extractConstraints>, crs: string
   return constraints.exit && constraints.exit.crs === crs ? constraints.exit.timeMinutes : null;
 }
 
+/**
+ * Writes one coupon's exact assessCoupon input and its verdict as a regression
+ * fixture (`--record <dir>`). The fixture is pure data (HSP-derived candidates,
+ * constraints, flags), so src/predict/corpus.test.ts can replay it with no
+ * database or credentials. Record only claims whose verdict has been verified
+ * by hand against HSP; see src/predict/corpus/README.md.
+ */
+async function recordFixture(dir: string, utn: string, input: AssessCouponInput, verdict: CouponVerdict): Promise<void> {
+  // The routeing-point resolver is a function and can't be serialised; the
+  // corpus replays with raw CRS codes for via checks.
+  const { resolveRouteingPoints: _resolver, ...serialisable } = input;
+  const fixture = {
+    utn,
+    coupon: input.coupon,
+    input: serialisable,
+    expected: {
+      entitled: verdict.entitled,
+      reason: verdict.reason,
+      confidence: verdict.confidence,
+      delayMinutes: verdict.delayMinutes,
+      band: verdict.band,
+      compensationPence: verdict.compensationPence,
+    },
+  };
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, `${utn}-${input.coupon}.json`), `${JSON.stringify(fixture, null, 2)}\n`, 'utf8');
+}
+
 async function assessTicket(
   raw: RawTicket,
   db: ReturnType<typeof openDb>,
@@ -66,6 +94,7 @@ async function assessTicket(
   routes: Map<string, RouteDefinition>,
   guide: RouteingGuide | null,
   restrictions: Map<string, RestrictionDefinition>,
+  recordDir: string | null,
 ): Promise<CouponVerdict[]> {
   const provider = new BatchDataProvider(db, hsp, raw.StartDate);
   const routeDef = raw.RouteCode ? routes.get(raw.RouteCode) ?? null : null;
@@ -184,9 +213,10 @@ async function assessTicket(
 
       const clipServices = await dated.clipServiceRuns(constraints.onTrain, toCrs);
 
-      verdicts.push(
-        assessCoupon({ ticket: couponTicket, coupon, fromCrs, toCrs, constraints, itineraries, bookedLegs, routeDef, resolveRouteingPoints, restrictionDef, itineraryPinned: plannedLegs != null, clipServices }),
-      );
+      const input: AssessCouponInput = { ticket: couponTicket, coupon, fromCrs, toCrs, constraints, itineraries, bookedLegs, routeDef, resolveRouteingPoints, restrictionDef, itineraryPinned: plannedLegs != null, clipServices };
+      const verdict = assessCoupon(input);
+      if (recordDir) await recordFixture(recordDir, raw.UTN, input, verdict);
+      verdicts.push(verdict);
     } catch (err) {
       verdicts.push(unresolved(coupon, 'NO_HSP_DATA_YET', `HSP lookup failed: ${(err as Error).message}`));
     }
@@ -217,9 +247,11 @@ function money(pence: number | null): string {
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
   const verbose = args.includes('--verbose');
-  const dir = args.find((a) => !a.startsWith('--'));
+  const recordIdx = args.indexOf('--record');
+  const recordDir = recordIdx >= 0 ? args[recordIdx + 1] ?? null : null;
+  const dir = args.find((a, i) => !a.startsWith('--') && i !== recordIdx + 1);
   if (!dir) {
-    console.log('Usage: npm run batch -- <dir of ticket JSON files> [--verbose]');
+    console.log('Usage: npm run batch -- <dir of ticket JSON files> [--verbose] [--record <fixture dir>]');
     process.exit(1);
   }
 
@@ -255,7 +287,7 @@ async function main(): Promise<void> {
   for (const file of files) {
     const json = JSON.parse(await readFile(path.join(dir, file), 'utf8')) as unknown;
     for (const ticket of extractTickets(json)) {
-      const coupons = await assessTicket(ticket, db, hsp, routes, guide, restrictions);
+      const coupons = await assessTicket(ticket, db, hsp, routes, guide, restrictions, recordDir);
       results.push({ utn: ticket.UTN, coupons });
       for (const v of coupons) {
         const delay = v.delayMinutes === null ? '-' : `${v.delayMinutes}m`;

@@ -1,0 +1,283 @@
+{
+  "utn": "TRB26SQNNGT",
+  "coupon": "Single",
+  "input": {
+    "ticket": {
+      "utn": "TRB26SQNNGT",
+      "ftot": "CDS",
+      "originNlc": "5080",
+      "destinationNlc": "5229",
+      "routeCode": "00700",
+      "pricePence": 1300,
+      "startDate": "2026-08-21",
+      "timeValidFrom": null,
+      "kind": "walk-up",
+      "fareType": "single",
+      "hasTimeRestriction": true
+    },
+    "coupon": "Single",
+    "fromCrs": "KTH",
+    "toCrs": "TON",
+    "constraints": {
+      "coupon": "Single",
+      "exit": {
+        "crs": "TON",
+        "timeMinutes": 1072
+      },
+      "onTrain": [
+        {
+          "info": {
+            "raw": "Fr1645 CHX-HGS 1H02/SE2102",
+            "routeFromCrs": "CHX",
+            "routeToCrs": "HGS",
+            "scheduledDeparture": 1005,
+            "serviceIds": [
+              "1H02",
+              "SE2102"
+            ]
+          },
+          "timeMinutes": 1053,
+          "accepted": true
+        }
+      ],
+      "reasonCodes": [],
+      "anomalies": []
+    },
+    "itineraries": [
+      {
+        "legs": [
+          {
+            "originCrs": "KTH",
+            "destinationCrs": "ORP",
+            "scheduledDeparture": 977,
+            "scheduledArrival": 999
+          },
+          {
+            "originCrs": "ORP",
+            "destinationCrs": "TON",
+            "scheduledDeparture": 1012,
+            "scheduledArrival": 1032
+          }
+        ],
+        "candidatesByLeg": [
+          [
+            {
+              "id": "202608218088643",
+              "scheduledDeparture": 962,
+              "scheduledArrival": 984,
+              "actualDeparture": 964,
+              "actualArrival": 985,
+              "cancelled": false,
+              "callingPoints": [
+                "KTH",
+                "BKJ",
+                "SRT",
+                "BMS",
+                "BKL",
+                "PET",
+                "ORP"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218088645",
+              "scheduledDeparture": 977,
+              "scheduledArrival": 999,
+              "actualDeparture": 997,
+              "actualArrival": 1030,
+              "cancelled": false,
+              "callingPoints": [
+                "KTH",
+                "BKJ",
+                "SRT",
+                "BMS",
+                "BKL",
+                "PET",
+                "ORP"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218088396",
+              "scheduledDeparture": 992,
+              "scheduledArrival": 1014,
+              "actualDeparture": 1001,
+              "actualArrival": 1033,
+              "cancelled": false,
+              "callingPoints": [
+                "KTH",
+                "BKJ",
+                "SRT",
+                "BMS",
+                "BKL",
+                "PET",
+                "ORP"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218088402",
+              "scheduledDeparture": 1007,
+              "scheduledArrival": 1029,
+              "actualDeparture": 1008,
+              "actualArrival": 1030,
+              "cancelled": false,
+              "callingPoints": [
+                "KTH",
+                "BKJ",
+                "SRT",
+                "BMS",
+                "BKL",
+                "PET",
+                "ORP"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218088407",
+              "scheduledDeparture": 1022,
+              "scheduledArrival": 1044,
+              "actualDeparture": 1027,
+              "actualArrival": 1051,
+              "cancelled": false,
+              "callingPoints": [
+                "KTH",
+                "BKJ",
+                "SRT",
+                "BMS",
+                "BKL",
+                "PET",
+                "ORP"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218088411",
+              "scheduledDeparture": 1037,
+              "scheduledArrival": 1059,
+              "actualDeparture": 1039,
+              "actualArrival": 1060,
+              "cancelled": false,
+              "callingPoints": [
+                "KTH",
+                "BKJ",
+                "SRT",
+                "BMS",
+                "BKL",
+                "PET",
+                "ORP"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218088416",
+              "scheduledDeparture": 1052,
+              "scheduledArrival": 1074,
+              "actualDeparture": 1054,
+              "actualArrival": 1073,
+              "cancelled": false,
+              "callingPoints": [
+                "KTH",
+                "BKJ",
+                "SRT",
+                "BMS",
+                "BKL",
+                "PET",
+                "ORP"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218088420",
+              "scheduledDeparture": 1067,
+              "scheduledArrival": 1089,
+              "actualDeparture": 1076,
+              "actualArrival": 1100,
+              "cancelled": false,
+              "callingPoints": [
+                "KTH",
+                "BKJ",
+                "SRT",
+                "BMS",
+                "BKL",
+                "PET",
+                "ORP"
+              ],
+              "toc": "SE"
+            }
+          ],
+          [
+            {
+              "id": "202608218087641",
+              "scheduledDeparture": 1012,
+              "scheduledArrival": 1032,
+              "actualDeparture": 1012,
+              "actualArrival": 1033,
+              "cancelled": false,
+              "callingPoints": [
+                "ORP",
+                "SEV",
+                "HLB",
+                "TON"
+              ],
+              "toc": "SE"
+            },
+            {
+              "id": "202608218087642",
+              "scheduledDeparture": 1042,
+              "scheduledArrival": 1063,
+              "actualDeparture": 1049,
+              "actualArrival": 1070,
+              "cancelled": false,
+              "callingPoints": [
+                "ORP",
+                "SEV",
+                "HLB",
+                "TON"
+              ],
+              "toc": "SE"
+            }
+          ]
+        ]
+      }
+    ],
+    "bookedLegs": null,
+    "routeDef": {
+      "code": "00700",
+      "description": "NOT VIA LONDON",
+      "category": "other",
+      "includeLocations": [],
+      "excludeLocations": [
+        "EUS"
+      ]
+    },
+    "restrictionDef": null,
+    "itineraryPinned": true,
+    "clipServices": [
+      {
+        "id": "202608218085399",
+        "scheduledDeparture": 1005,
+        "scheduledArrival": 1049,
+        "actualDeparture": 1012,
+        "actualArrival": 1063,
+        "cancelled": false,
+        "callingPoints": [
+          "CHX",
+          "WAE",
+          "LBG",
+          "SEV",
+          "TON"
+        ],
+        "toc": "SE"
+      }
+    ]
+  },
+  "expected": {
+    "entitled": false,
+    "reason": "BELOW_THRESHOLD",
+    "confidence": "CONFIRMED",
+    "delayMinutes": 14,
+    "band": null,
+    "compensationPence": null
+  }
+}
